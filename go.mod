@@ -28,6 +28,7 @@ require (
 	github.com/multiformats/go-multibase v0.1.1
 	github.com/multiformats/go-multihash v0.2.1
 	github.com/multiformats/go-multistream v0.3.3
+	github.com/ssrivatsan97/go-libp2p-kad-dht/eclipse-detection v0.0.0-00010101000000-000000000000
 	github.com/stretchr/testify v1.8.0
 	github.com/whyrusleeping/go-keyspace v0.0.0-20160322163242-5b898ac5add1
 	go.opencensus.io v0.23.0

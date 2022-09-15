@@ -20,6 +20,7 @@ import (
 	kb "github.com/libp2p/go-libp2p-kbucket"
 	record "github.com/libp2p/go-libp2p-record"
 	"github.com/multiformats/go-multihash"
+	detection "github.com/ssrivatsan97/go-libp2p-kad-dht/eclipse-detection"
 )
 
 // This file implements the Routing interface for the IpfsDHT struct.
@@ -371,6 +372,8 @@ func (dht *IpfsDHT) refreshRTIfNoShortcut(key kb.ID, lookupRes *lookupWithFollow
 
 // Provide makes this node announce that it can provide a value for the given key
 func (dht *IpfsDHT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (err error) {
+	fmt.Println("Entered Provide function in custom go-libp2p: cid", key)
+
 	if !dht.enableProviders {
 		return routing.ErrNotSupported
 	} else if !key.Defined() {
@@ -422,6 +425,35 @@ func (dht *IpfsDHT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (err 
 		return err
 	}
 
+	// Eclipse attack detection here
+	fmt.Println("Testing cid", key, "for eclipse attack...")
+	targetBytes := []byte(kb.ConvertKey(string(keyMH)))
+	fmt.Printf("Key in DHT space: %x \n", targetBytes)
+	peeridsBytes := make([][]byte, len(peers))
+	fmt.Println("Number of peers obtained: ", len(peers))
+	for i := range peeridsBytes {
+		peeridsBytes[i] = []byte(kb.ConvertKey(string(peers[i])))
+		fmt.Printf("%s %x \n", peers[i], peeridsBytes[i])
+	}
+
+	det_k := 20 // Need to fix as global config parameter later
+	// If det_k is not 20, implement getting more peers
+	det_l := 9 // Need to code the adaptive tuning mechanism
+	threshold := 1.0
+	detector := detection.New(det_k, det_l, threshold) // This would also be a global variable initialized in advance
+	counts := detector.ComputePrefixLenCounts(targetBytes, peeridsBytes)
+	kl := detector.ComputeKLFromCounts(counts)
+	fmt.Println("Counts: ", counts)
+	fmt.Println("KL divergence: ", kl)
+	var result string
+	if detector.DetectFromKL(kl) {
+		result = "possible attack"
+	} else {
+		result = "no attack"
+	}
+	fmt.Println("Eclipse attack detector says: ", result, ", threshold = ", threshold)
+	// Eclipse attack detection code ends here
+
 	wg := sync.WaitGroup{}
 	for _, p := range peers {
 		wg.Add(1)
@@ -443,6 +475,8 @@ func (dht *IpfsDHT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (err 
 
 // FindProviders searches until the context expires.
 func (dht *IpfsDHT) FindProviders(ctx context.Context, c cid.Cid) ([]peer.AddrInfo, error) {
+	fmt.Println("Entered FindProviders function in custom go-libp2p: cid ", c)
+
 	if !dht.enableProviders {
 		return nil, routing.ErrNotSupported
 	} else if !c.Defined() {
@@ -462,6 +496,8 @@ func (dht *IpfsDHT) FindProviders(ctx context.Context, c cid.Cid) ([]peer.AddrIn
 // completes. Note: not reading from the returned channel may block the query
 // from progressing.
 func (dht *IpfsDHT) FindProvidersAsync(ctx context.Context, key cid.Cid, count int) <-chan peer.AddrInfo {
+	fmt.Println("Entered FindProvidersAsync function in custom go-libp2p: cid ", key)
+
 	if !dht.enableProviders || !key.Defined() {
 		peerOut := make(chan peer.AddrInfo)
 		close(peerOut)
@@ -575,6 +611,8 @@ func (dht *IpfsDHT) findProvidersAsyncRoutine(ctx context.Context, key multihash
 		},
 	)
 
+	// Check here also for eclipse attacks, maybe. But why is this function using multihash instead of key? :(
+
 	if err == nil && ctx.Err() == nil {
 		dht.refreshRTIfNoShortcut(kb.ConvertKey(string(key)), lookupRes)
 	}
@@ -582,6 +620,8 @@ func (dht *IpfsDHT) findProvidersAsyncRoutine(ctx context.Context, key multihash
 
 // FindPeer searches for a peer with given ID.
 func (dht *IpfsDHT) FindPeer(ctx context.Context, id peer.ID) (_ peer.AddrInfo, err error) {
+	fmt.Println("Entered FindPeer function in custom go-libp2p: peerid ", id)
+
 	if err := id.Validate(); err != nil {
 		return peer.AddrInfo{}, err
 	}
