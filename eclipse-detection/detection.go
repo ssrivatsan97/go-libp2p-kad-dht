@@ -1,7 +1,6 @@
 package detection
 
 import (
-	"fmt"
 	"math"
 
 	// XOR of byte slices
@@ -15,14 +14,16 @@ type EclipseDetector struct {
 	threshold float64
 }
 
-const keySize = 256
+const (
+	keySize = 256
+)
 
-func New(k int, l int, threshold float64) *EclipseDetector {
+func New(k int) *EclipseDetector {
 	det := &EclipseDetector{
 		k:         k,
 		idealDist: make([]float64, keySize),
-		l:         l,
-		threshold: threshold,
+		l:         0,
+		threshold: math.Inf(1), // by default, say there are no attacks
 	}
 	for i := 0; i < keySize; i++ {
 		det.idealDist[i] = math.Pow(0.5, float64(i+1))
@@ -40,7 +41,6 @@ func (det *EclipseDetector) UpdateThreshold(threshold float64) {
 
 func (det *EclipseDetector) ComputePrefixLenCounts(id []byte, closestIds [][]byte) []int { // How are peerids represented?
 	counts := make([]int, keySize)
-	fmt.Println(len(closestIds))
 	for _, cid := range closestIds {
 		prefixLen := kb.CommonPrefixLen(id, cid)
 		counts[prefixLen]++

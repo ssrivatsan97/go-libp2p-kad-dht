@@ -58,3 +58,47 @@ func (dht *IpfsDHT) GetClosestPeers(ctx context.Context, key string) ([]peer.ID,
 
 	return lookupRes.peers, ctx.Err()
 }
+
+func (dht *IpfsDHT) GetClosestPeersExtend(ctx context.Context, key string, numPeers int) ([]peer.ID, error) {
+	if key == "" {
+		return nil, fmt.Errorf("can't lookup empty key")
+	}
+	// TODO: I can break the interface! return []peer.ID
+	lookupRes, err := dht.runLookupWithFollowupExtend(ctx, key,
+		func(ctx context.Context, p peer.ID) ([]*peer.AddrInfo, error) {
+			// For DHT query command
+			routing.PublishQueryEvent(ctx, &routing.QueryEvent{
+				Type: routing.SendingQuery,
+				ID:   p,
+			})
+
+			peers, err := dht.protoMessenger.GetClosestPeers(ctx, p, peer.ID(key))
+			if err != nil {
+				logger.Debugf("error getting closer peers: %s", err)
+				return nil, err
+			}
+
+			// For DHT query command
+			routing.PublishQueryEvent(ctx, &routing.QueryEvent{
+				Type:      routing.PeerResponse,
+				ID:        p,
+				Responses: peers,
+			})
+
+			return peers, err
+		},
+		func() bool { return false },
+		numPeers,
+	)
+
+	if err != nil {
+		return nil, err
+	}
+
+	if ctx.Err() == nil && lookupRes.completed {
+		// refresh the cpl for this key as the query was successful
+		dht.routingTable.ResetCplRefreshedAtForID(kb.ConvertKey(key), time.Now())
+	}
+
+	return lookupRes.peers, ctx.Err()
+}

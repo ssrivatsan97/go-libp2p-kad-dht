@@ -20,7 +20,6 @@ import (
 	kb "github.com/libp2p/go-libp2p-kbucket"
 	record "github.com/libp2p/go-libp2p-record"
 	"github.com/multiformats/go-multihash"
-	detection "github.com/ssrivatsan97/go-libp2p-kad-dht/eclipse-detection"
 )
 
 // This file implements the Routing interface for the IpfsDHT struct.
@@ -371,6 +370,8 @@ func (dht *IpfsDHT) refreshRTIfNoShortcut(key kb.ID, lookupRes *lookupWithFollow
 // locations of the value, similarly to Coral and Mainline DHT.
 
 // Provide makes this node announce that it can provide a value for the given key
+
+// THIS FUNCTION IS TEMPORARILY MODIFIED TO ONLY DO ECLIPSE DETECTION AND NO PROVIDE
 func (dht *IpfsDHT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (err error) {
 	fmt.Println("Entered Provide function in custom go-libp2p: cid", key)
 
@@ -383,10 +384,10 @@ func (dht *IpfsDHT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (err 
 	logger.Debugw("providing", "cid", key, "mh", internal.LoggableProviderRecordBytes(keyMH))
 
 	// add self locally
-	dht.providerStore.AddProvider(ctx, keyMH, peer.AddrInfo{ID: dht.self})
-	if !brdcst {
-		return nil
-	}
+	// dht.providerStore.AddProvider(ctx, keyMH, peer.AddrInfo{ID: dht.self})
+	// if !brdcst {
+	// 	return nil
+	// }
 
 	closerCtx := ctx
 	if deadline, ok := ctx.Deadline(); ok {
@@ -410,7 +411,7 @@ func (dht *IpfsDHT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (err 
 	}
 
 	var exceededDeadline bool
-	peers, err := dht.GetClosestPeers(closerCtx, string(keyMH))
+	peers, err := dht.GetClosestPeersExtend(closerCtx, string(keyMH), defaultEclipseDetectionK)
 	switch err {
 	case context.DeadlineExceeded:
 		// If the _inner_ deadline has been exceeded but the _outer_
@@ -425,8 +426,34 @@ func (dht *IpfsDHT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (err 
 		return err
 	}
 
+	// wg := sync.WaitGroup{}
+	// for _, p := range peers {
+	// 	wg.Add(1)
+	// 	go func(p peer.ID) {
+	// 		defer wg.Done()
+	// 		logger.Debugf("putProvider(%s, %s)", internal.LoggableProviderRecordBytes(keyMH), p)
+	// 		err := dht.protoMessenger.PutProvider(ctx, p, keyMH, dht.host)
+	// 		if err != nil {
+	// 			logger.Debug(err)
+	// 		}
+	// 	}(p)
+	// }
+	// wg.Wait()
+	if exceededDeadline {
+		return context.DeadlineExceeded
+	}
+
+	dht.addDetector()
+	dht.detector.UpdateL(8)
+	dht.detector.UpdateThreshold(1.0)
+
 	// Eclipse attack detection here
 	fmt.Println("Testing cid", key, "for eclipse attack...")
+	if dht.detector == nil {
+		fmt.Println("Detector not initialized!")
+		return ctx.Err() // create an error for this!
+	}
+
 	targetBytes := []byte(kb.ConvertKey(string(keyMH)))
 	fmt.Printf("Key in DHT space: %x \n", targetBytes)
 	peeridsBytes := make([][]byte, len(peers))
@@ -436,40 +463,19 @@ func (dht *IpfsDHT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (err 
 		fmt.Printf("%s %x \n", peers[i], peeridsBytes[i])
 	}
 
-	det_k := 20 // Need to fix as global config parameter later
-	// If det_k is not 20, implement getting more peers
-	det_l := 9 // Need to code the adaptive tuning mechanism
-	threshold := 1.0
-	detector := detection.New(det_k, det_l, threshold) // This would also be a global variable initialized in advance
-	counts := detector.ComputePrefixLenCounts(targetBytes, peeridsBytes)
-	kl := detector.ComputeKLFromCounts(counts)
+	counts := dht.detector.ComputePrefixLenCounts(targetBytes, peeridsBytes)
+	kl := dht.detector.ComputeKLFromCounts(counts)
 	fmt.Println("Counts: ", counts)
 	fmt.Println("KL divergence: ", kl)
 	var result string
-	if detector.DetectFromKL(kl) {
+	if dht.detector.DetectFromKL(kl) {
 		result = "possible attack"
 	} else {
 		result = "no attack"
 	}
-	fmt.Println("Eclipse attack detector says: ", result, ", threshold = ", threshold)
+	fmt.Println("Eclipse attack detector says: ", result, ", threshold = ", 1.0)
 	// Eclipse attack detection code ends here
 
-	wg := sync.WaitGroup{}
-	for _, p := range peers {
-		wg.Add(1)
-		go func(p peer.ID) {
-			defer wg.Done()
-			logger.Debugf("putProvider(%s, %s)", internal.LoggableProviderRecordBytes(keyMH), p)
-			err := dht.protoMessenger.PutProvider(ctx, p, keyMH, dht.host)
-			if err != nil {
-				logger.Debug(err)
-			}
-		}(p)
-	}
-	wg.Wait()
-	if exceededDeadline {
-		return context.DeadlineExceeded
-	}
 	return ctx.Err()
 }
 

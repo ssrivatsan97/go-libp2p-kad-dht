@@ -36,6 +36,8 @@ import (
 	ma "github.com/multiformats/go-multiaddr"
 	"go.opencensus.io/tag"
 	"go.uber.org/zap"
+
+	detection "github.com/ssrivatsan97/go-libp2p-kad-dht/eclipse-detection"
 )
 
 var (
@@ -72,6 +74,8 @@ type addPeerRTReq struct {
 	p         peer.ID
 	queryPeer bool
 }
+
+const defaultEclipseDetectionK = 50
 
 // IpfsDHT is an implementation of Kademlia with S/Kademlia modifications.
 // It is used to implement the base Routing module.
@@ -148,6 +152,9 @@ type IpfsDHT struct {
 
 	// configuration variables for tests
 	testAddressUpdateProcessing bool
+
+	// Used for eclipse attack detection
+	detector *detection.EclipseDetector
 }
 
 // Assert that IPFS assumptions about interfaces aren't broken. These aren't a
@@ -848,4 +855,8 @@ func (dht *IpfsDHT) maybeAddAddrs(p peer.ID, addrs []ma.Multiaddr, ttl time.Dura
 		return
 	}
 	dht.peerstore.AddAddrs(p, addrs, ttl)
+}
+
+func (dht *IpfsDHT) addDetector() {
+	dht.detector = detection.New(defaultEclipseDetectionK)
 }
