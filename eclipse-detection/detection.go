@@ -3,6 +3,8 @@ package detection
 import (
 	"math"
 
+	"gonum.org/v1/gonum/stat/distuv"
+
 	// XOR of byte slices
 	kb "github.com/libp2p/go-libp2p-kbucket" // common prefix length of two IDs
 )
@@ -16,6 +18,7 @@ type EclipseDetector struct {
 
 const (
 	keySize = 256
+	eps     = 0.001
 )
 
 func New(k int) *EclipseDetector {
@@ -33,6 +36,38 @@ func New(k int) *EclipseDetector {
 
 func (det *EclipseDetector) UpdateL(l int) {
 	det.l = l
+}
+
+func (det *EclipseDetector) UpdateLFromNetsize(n int) int {
+	orderPmfs := make([][]float64, det.k)
+	s := make([]float64, keySize)
+	for i := 0; i < det.k; i++ {
+		orderPmfs[i] = make([]float64, keySize)
+		for x := 0; x < keySize; x++ {
+			b := distuv.Binomial{
+				N: float64(n),
+				P: math.Pow(0.5, float64(x+1)),
+			}
+			s[x] += b.Prob(float64(i))
+			if x == 0 {
+				orderPmfs[i][x] = s[x]
+			} else {
+				orderPmfs[i][x] = s[x] - s[x-1]
+			}
+		}
+	}
+	for x := 0; x < keySize; x++ {
+		var avgPmfX float64
+		for i := 0; i < det.k; i++ {
+			avgPmfX += orderPmfs[i][x]
+		}
+		avgPmfX /= float64(det.k)
+		if avgPmfX > eps {
+			det.l = x
+			return x
+		}
+	}
+	return keySize
 }
 
 func (det *EclipseDetector) UpdateThreshold(threshold float64) {

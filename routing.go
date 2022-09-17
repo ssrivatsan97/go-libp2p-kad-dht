@@ -373,6 +373,8 @@ func (dht *IpfsDHT) refreshRTIfNoShortcut(key kb.ID, lookupRes *lookupWithFollow
 
 // THIS FUNCTION IS TEMPORARILY MODIFIED TO ONLY DO ECLIPSE DETECTION AND NO PROVIDE
 func (dht *IpfsDHT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (err error) {
+	dht.providerLk.Lock()         // TODO(Srivatsan): This is just to prevent concurrent provides from annoying me for now. Will be removed later
+	defer dht.providerLk.Unlock() // TODO(Srivatsan): This is just to prevent concurrent provides from annoying me for now. Will be removed later
 	fmt.Println("Entered Provide function in custom go-libp2p: cid", key)
 
 	if !dht.enableProviders {
@@ -443,16 +445,39 @@ func (dht *IpfsDHT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (err 
 		return context.DeadlineExceeded
 	}
 
-	dht.addDetector()
-	dht.detector.UpdateL(8)
-	dht.detector.UpdateThreshold(1.0)
-
 	// Eclipse attack detection here
 	fmt.Println("Testing cid", key, "for eclipse attack...")
 	if dht.detector == nil {
-		fmt.Println("Detector not initialized!")
-		return ctx.Err() // create an error for this!
+		return fmt.Errorf("Detector not initialized!")
 	}
+
+	// Here, get closest peers for a random id in each bucket, add it to track for network size estimation, then estimate network size, then calculate L accordingly.
+	fmt.Println("First estimating network size. This may take some time...")
+	const numSamples = 5
+	for cpl := 0; cpl < numSamples; cpl++ {
+		fmt.Println("Common prefix length = ", cpl)
+		randId, err := dht.routingTable.GenRandPeerID(uint(cpl))
+		if err != nil {
+			return fmt.Errorf("Error in generating random peer id for CPL = %v", cpl)
+		}
+		closestPeers, err := dht.GetClosestPeers(ctx, string(randId))
+		if err != nil {
+			return fmt.Errorf("Error in getting closest peers for random id %s", randId)
+		}
+		fmt.Println("Obtained closest peers: ")
+		fmt.Println(closestPeers)
+		// Calling getClosestPeers automatically adds the closest peers to the tracking list.
+	}
+
+	netsize, err := dht.nsEstimator.NetworkSize()
+	if err != nil {
+		return err
+	}
+	fmt.Println("Estimated network size as", netsize)
+
+	l_est := dht.detector.UpdateLFromNetsize(int(netsize))
+	fmt.Println("Estimated parameter l as", l_est)
+	dht.detector.UpdateThreshold(1.0)
 
 	targetBytes := []byte(kb.ConvertKey(string(keyMH)))
 	fmt.Printf("Key in DHT space: %x \n", targetBytes)
