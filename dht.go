@@ -76,7 +76,7 @@ type addPeerRTReq struct {
 	queryPeer bool
 }
 
-const defaultEclipseDetectionK = 50
+const defaultEclipseDetectionK = 20
 
 // IpfsDHT is an implementation of Kademlia with S/Kademlia modifications.
 // It is used to implement the base Routing module.
