@@ -92,7 +92,7 @@ func (det *EclipseDetector) ComputeKLFromCounts(prefixLenCounts []int) float64 {
 	for p := det.l; p < keySize; p++ {
 		if prefixLenCounts[p] > 0 {
 			prob := float64(prefixLenCounts[p]) / float64(det.k)
-			kl += prob * math.Log(prob/det.idealDist[p])
+			kl += prob * math.Log(prob/(det.idealDist[p]/det.idealDist[det.l-1]))
 		}
 	}
 	return kl
