@@ -10,15 +10,17 @@ import (
 )
 
 type EclipseDetector struct {
-	k         int
-	idealDist []float64
-	l         int
-	threshold float64
+	k            int
+	idealDist    []float64
+	l            int
+	threshold    float64
+	thresholdMap map[int]float64
 }
 
 const (
-	keySize = 256
-	eps     = 0.001
+	keySize              = 256
+	eps                  = 0.001
+	thresholdMapInterval = 1000
 )
 
 func New(k int) *EclipseDetector {
@@ -27,6 +29,48 @@ func New(k int) *EclipseDetector {
 		idealDist: make([]float64, keySize),
 		l:         0,
 		threshold: math.Inf(1), // by default, say there are no attacks
+		thresholdMap: map[int]float64{
+			10000: 1.5316765986059655,
+			11000: 1.538657899641121,
+			12000: 1.5740467141787955,
+			13000: 1.6381675841972336,
+			14000: 1.745077285059787,
+			15000: 1.7181823662090514,
+			16000: 1.7908064287069463,
+			17000: 1.156022302500651,
+			18000: 1.175734315398986,
+			19000: 1.1542823194843208,
+			20000: 1.2291546751913174,
+			21000: 1.2923489041964578,
+			22000: 1.3694039734028194,
+			23000: 1.5137507072259009,
+			24000: 1.5447567799609476,
+			25000: 1.5577638653681902,
+			26000: 1.60161784877906,
+			27000: 1.654936423539085,
+			28000: 1.641784494533182,
+			29000: 1.655449897684465,
+			30000: 1.6975670196217854,
+			31000: 1.7405517002592936,
+			32000: 1.7940663958943739,
+			33000: 1.0413645834354617,
+			34000: 1.0829225170056334,
+			35000: 1.1511232009669132,
+			36000: 1.1595493933661236,
+			37000: 1.1455248288820432,
+			38000: 1.1915813083443891,
+			39000: 1.1900415398062867,
+			40000: 1.1625857101864194,
+			41000: 1.2920090068236707,
+			42000: 1.2195293900441366,
+			43000: 1.3396061759989502,
+			44000: 1.3573602254948913,
+			45000: 1.521389821971196,
+			46000: 1.503108310847049,
+			47000: 1.4571818841114597,
+			48000: 1.528069407103029,
+			49000: 1.5659135074742079,
+		},
 	}
 	for i := 0; i < keySize; i++ {
 		det.idealDist[i] = math.Pow(0.5, float64(i+1))
@@ -72,6 +116,13 @@ func (det *EclipseDetector) UpdateLFromNetsize(n int) int {
 
 func (det *EclipseDetector) UpdateThreshold(threshold float64) {
 	det.threshold = threshold
+}
+
+func (det *EclipseDetector) UpdateThresholdFromNetsize(n int) float64 {
+	key := int(math.Round(float64(n)/float64(thresholdMapInterval))) * thresholdMapInterval
+	t := det.thresholdMap[key]
+	det.threshold = t
+	return t
 }
 
 func (det *EclipseDetector) ComputePrefixLenCounts(id []byte, closestIds [][]byte) []int { // How are peerids represented?

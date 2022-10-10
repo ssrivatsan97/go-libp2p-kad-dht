@@ -477,7 +477,9 @@ func (dht *IpfsDHT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (err 
 
 	l_est := dht.detector.UpdateLFromNetsize(int(netsize))
 	fmt.Println("Estimated parameter l as", l_est)
-	dht.detector.UpdateThreshold(1.0)
+	// dht.detector.UpdateThreshold(1.0)
+	threshold := dht.detector.UpdateThresholdFromNetsize(int(netsize))
+	fmt.Println("Estimated threshold as", threshold)
 
 	targetBytes := []byte(kb.ConvertKey(string(keyMH)))
 	fmt.Printf("Key in DHT space: %x \n", targetBytes)
@@ -498,7 +500,7 @@ func (dht *IpfsDHT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (err 
 	} else {
 		result = "no attack"
 	}
-	fmt.Println("Eclipse attack detector says: ", result, ", threshold = ", 1.0)
+	fmt.Println("Eclipse attack detector says: ", result, ", threshold =", threshold)
 	// Eclipse attack detection code ends here
 
 	return ctx.Err()
