@@ -365,6 +365,71 @@ func (dht *IpfsDHT) refreshRTIfNoShortcut(key kb.ID, lookupRes *lookupWithFollow
 	}
 }
 
+func (dht *IpfsDHT) eclipseDetection(ctx context.Context, keyMH multihash.Multihash, peers []peer.ID) (bool, error) {
+	// Eclipse attack detection here
+	fmt.Println("Testing cid hash", keyMH, "for eclipse attack...")
+	if dht.detector == nil {
+		return false, fmt.Errorf("Detector not initialized!")
+	}
+
+	// Here, get closest peers for a random id in each bucket, add it to track for network size estimation, then estimate network size, then calculate L accordingly.
+	fmt.Println("First estimating network size. This may take some time...")
+	const numSamples = 5
+	for cpl := 0; cpl < numSamples; cpl++ {
+		// fmt.Println("Common prefix length = ", cpl)
+		randId, err := dht.routingTable.GenRandPeerID(uint(cpl))
+		if err != nil {
+			return false, fmt.Errorf("Error in generating random peer id for CPL = %v", cpl)
+		}
+		closestPeers, err := dht.GetClosestPeers(ctx, string(randId))
+		_ = closestPeers
+		if err != nil {
+			return false, fmt.Errorf("Error in getting closest peers for random id %s", randId)
+		}
+		// fmt.Println("Obtained closest peers: ")
+		// fmt.Println(closestPeers)
+		// Calling getClosestPeers automatically adds the closest peers to the tracking list.
+	}
+
+	netsize, err := dht.nsEstimator.NetworkSize()
+	if err != nil {
+		return false, err
+	}
+	fmt.Println("Estimated network size as", netsize)
+
+	l_est := dht.detector.UpdateLFromNetsize(int(netsize))
+	fmt.Println("Estimated parameter l as", l_est)
+	// dht.detector.UpdateThreshold(1.0)
+	threshold := dht.detector.UpdateThresholdFromNetsize(int(netsize))
+	fmt.Println("Estimated threshold as", threshold)
+
+	targetBytes := []byte(kb.ConvertKey(string(keyMH)))
+	fmt.Println("Eclipse attack detection for id hash:", keyMH)
+	fmt.Println("CID in the DHT keyspace:", targetBytes)
+	peeridsBytes := make([][]byte, len(peers))
+	fmt.Println("Number of peers obtained: ", len(peers))
+	for i := range peeridsBytes {
+		peeridsBytes[i] = []byte(kb.ConvertKey(string(peers[i])))
+		fmt.Printf("%s %x \n", peers[i], peeridsBytes[i])
+		// fmt.Printf("%s \n", peers[i])
+	}
+
+	counts := dht.detector.ComputePrefixLenCounts(targetBytes, peeridsBytes)
+	kl := dht.detector.ComputeKLFromCounts(counts)
+	fmt.Println("Counts: ", counts)
+	fmt.Println("KL divergence: ", kl)
+	result := dht.detector.DetectFromKL(kl)
+	var resultStr string
+	if result {
+		resultStr = "possible attack"
+	} else {
+		resultStr = "no attack"
+	}
+	fmt.Println("Eclipse attack detector says: ", resultStr, ", threshold =", threshold)
+	// Eclipse attack detection code ends here
+	return result, nil
+}
+
 // Provider abstraction for indirect stores.
 // Some DHTs store values directly, while an indirect store stores pointers to
 // locations of the value, similarly to Coral and Mainline DHT.
@@ -375,21 +440,22 @@ func (dht *IpfsDHT) refreshRTIfNoShortcut(key kb.ID, lookupRes *lookupWithFollow
 func (dht *IpfsDHT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (err error) {
 	dht.providerLk.Lock()         // TODO(Srivatsan): This is just to prevent concurrent provides from annoying me for now. Will be removed later
 	defer dht.providerLk.Unlock() // TODO(Srivatsan): This is just to prevent concurrent provides from annoying me for now. Will be removed later
-	fmt.Println("Entered Provide function in custom go-libp2p: cid", key)
+
+	keyMH := key.Hash()
+	fmt.Println("Entered Provide function in custom go-libp2p: cid", key, ", hash:", keyMH)
 
 	if !dht.enableProviders {
 		return routing.ErrNotSupported
 	} else if !key.Defined() {
 		return fmt.Errorf("invalid cid: undefined")
 	}
-	keyMH := key.Hash()
 	logger.Debugw("providing", "cid", key, "mh", internal.LoggableProviderRecordBytes(keyMH))
 
 	// add self locally
-	// dht.providerStore.AddProvider(ctx, keyMH, peer.AddrInfo{ID: dht.self})
-	// if !brdcst {
-	// 	return nil
-	// }
+	dht.providerStore.AddProvider(ctx, keyMH, peer.AddrInfo{ID: dht.self})
+	if !brdcst {
+		return nil
+	}
 
 	closerCtx := ctx
 	if deadline, ok := ctx.Deadline(); ok {
@@ -428,87 +494,34 @@ func (dht *IpfsDHT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (err 
 		return err
 	}
 
-	// wg := sync.WaitGroup{}
-	// for _, p := range peers {
-	// 	wg.Add(1)
-	// 	go func(p peer.ID) {
-	// 		defer wg.Done()
-	// 		logger.Debugf("putProvider(%s, %s)", internal.LoggableProviderRecordBytes(keyMH), p)
-	// 		err := dht.protoMessenger.PutProvider(ctx, p, keyMH, dht.host)
-	// 		if err != nil {
-	// 			logger.Debug(err)
-	// 		}
-	// 	}(p)
-	// }
-	// wg.Wait()
+	wg := sync.WaitGroup{}
+	for _, p := range peers {
+		wg.Add(1)
+		go func(p peer.ID) {
+			defer wg.Done()
+			logger.Debugf("putProvider(%s, %s)", internal.LoggableProviderRecordBytes(keyMH), p)
+			err := dht.protoMessenger.PutProvider(ctx, p, keyMH, dht.host)
+			if err != nil {
+				logger.Debug(err)
+			}
+		}(p)
+	}
+	wg.Wait()
 	if exceededDeadline {
 		return context.DeadlineExceeded
 	}
 
-	// Eclipse attack detection here
-	fmt.Println("Testing cid", key, "for eclipse attack...")
-	if dht.detector == nil {
-		return fmt.Errorf("Detector not initialized!")
-	}
-
-	// Here, get closest peers for a random id in each bucket, add it to track for network size estimation, then estimate network size, then calculate L accordingly.
-	fmt.Println("First estimating network size. This may take some time...")
-	const numSamples = 5
-	for cpl := 0; cpl < numSamples; cpl++ {
-		fmt.Println("Common prefix length = ", cpl)
-		randId, err := dht.routingTable.GenRandPeerID(uint(cpl))
-		if err != nil {
-			return fmt.Errorf("Error in generating random peer id for CPL = %v", cpl)
-		}
-		closestPeers, err := dht.GetClosestPeers(ctx, string(randId))
-		if err != nil {
-			return fmt.Errorf("Error in getting closest peers for random id %s", randId)
-		}
-		fmt.Println("Obtained closest peers: ")
-		fmt.Println(closestPeers)
-		// Calling getClosestPeers automatically adds the closest peers to the tracking list.
-	}
-
-	netsize, err := dht.nsEstimator.NetworkSize()
-	if err != nil {
-		return err
-	}
-	fmt.Println("Estimated network size as", netsize)
-
-	l_est := dht.detector.UpdateLFromNetsize(int(netsize))
-	fmt.Println("Estimated parameter l as", l_est)
-	// dht.detector.UpdateThreshold(1.0)
-	threshold := dht.detector.UpdateThresholdFromNetsize(int(netsize))
-	fmt.Println("Estimated threshold as", threshold)
-
-	targetBytes := []byte(kb.ConvertKey(string(keyMH)))
-	fmt.Printf("Key in DHT space: %x \n", targetBytes)
-	peeridsBytes := make([][]byte, len(peers))
-	fmt.Println("Number of peers obtained: ", len(peers))
-	for i := range peeridsBytes {
-		peeridsBytes[i] = []byte(kb.ConvertKey(string(peers[i])))
-		fmt.Printf("%s %x \n", peers[i], peeridsBytes[i])
-	}
-
-	counts := dht.detector.ComputePrefixLenCounts(targetBytes, peeridsBytes)
-	kl := dht.detector.ComputeKLFromCounts(counts)
-	fmt.Println("Counts: ", counts)
-	fmt.Println("KL divergence: ", kl)
-	var result string
-	if dht.detector.DetectFromKL(kl) {
-		result = "possible attack"
-	} else {
-		result = "no attack"
-	}
-	fmt.Println("Eclipse attack detector says: ", result, ", threshold =", threshold)
-	// Eclipse attack detection code ends here
+	// _, e := dht.eclipseDetection(ctx, keyMH, peers)
+	// if e != nil {
+	// 	return e
+	// }
 
 	return ctx.Err()
 }
 
 // FindProviders searches until the context expires.
 func (dht *IpfsDHT) FindProviders(ctx context.Context, c cid.Cid) ([]peer.AddrInfo, error) {
-	fmt.Println("Entered FindProviders function in custom go-libp2p: cid ", c)
+	fmt.Println("Entered FindProviders function in custom go-libp2p: cid ", c, "hash:", c.Hash())
 
 	if !dht.enableProviders {
 		return nil, routing.ErrNotSupported
@@ -529,7 +542,7 @@ func (dht *IpfsDHT) FindProviders(ctx context.Context, c cid.Cid) ([]peer.AddrIn
 // completes. Note: not reading from the returned channel may block the query
 // from progressing.
 func (dht *IpfsDHT) FindProvidersAsync(ctx context.Context, key cid.Cid, count int) <-chan peer.AddrInfo {
-	fmt.Println("Entered FindProvidersAsync function in custom go-libp2p: cid ", key)
+	fmt.Println("Entered FindProvidersAsync function in custom go-libp2p: cid ", key, ", hash:", key.Hash())
 
 	if !dht.enableProviders || !key.Defined() {
 		peerOut := make(chan peer.AddrInfo)
@@ -645,6 +658,16 @@ func (dht *IpfsDHT) findProvidersAsyncRoutine(ctx context.Context, key multihash
 	)
 
 	// Check here also for eclipse attacks, maybe. But why is this function using multihash instead of key? :(
+	if lookupRes != nil {
+		fmt.Println("Found providers: ", (*lookupRes).peers)
+		// No, it's okay :)
+		_, e := dht.eclipseDetection(ctx, key, (*lookupRes).peers)
+		if e != nil {
+			fmt.Println(e)
+		}
+	} else {
+		fmt.Println("lookupRes was nil!")
+	}
 
 	if err == nil && ctx.Err() == nil {
 		dht.refreshRTIfNoShortcut(kb.ConvertKey(string(key)), lookupRes)
