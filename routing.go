@@ -405,7 +405,7 @@ func (dht *IpfsDHT) eclipseDetection(ctx context.Context, keyMH multihash.Multih
 
 	targetBytes := []byte(kb.ConvertKey(string(keyMH)))
 	fmt.Println("Eclipse attack detection for id hash:", keyMH)
-	fmt.Println("CID in the DHT keyspace:", targetBytes)
+	fmt.Printf("CID in the DHT keyspace: %x \n", targetBytes)
 	peeridsBytes := make([][]byte, len(peers))
 	fmt.Println("Number of peers obtained: ", len(peers))
 	for i := range peeridsBytes {
@@ -442,7 +442,7 @@ func (dht *IpfsDHT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (err 
 	defer dht.providerLk.Unlock() // TODO(Srivatsan): This is just to prevent concurrent provides from annoying me for now. Will be removed later
 
 	keyMH := key.Hash()
-	fmt.Println("Entered Provide function in custom go-libp2p: cid", key, ", hash:", keyMH)
+	fmt.Println("Provide: cid", key, ", hash:", keyMH)
 
 	if !dht.enableProviders {
 		return routing.ErrNotSupported
@@ -521,7 +521,7 @@ func (dht *IpfsDHT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (err 
 
 // FindProviders searches until the context expires.
 func (dht *IpfsDHT) FindProviders(ctx context.Context, c cid.Cid) ([]peer.AddrInfo, error) {
-	fmt.Println("Entered FindProviders function in custom go-libp2p: cid ", c, "hash:", c.Hash())
+	fmt.Println("FindProviders: cid ", c, "hash:", c.Hash())
 
 	if !dht.enableProviders {
 		return nil, routing.ErrNotSupported
@@ -542,7 +542,7 @@ func (dht *IpfsDHT) FindProviders(ctx context.Context, c cid.Cid) ([]peer.AddrIn
 // completes. Note: not reading from the returned channel may block the query
 // from progressing.
 func (dht *IpfsDHT) FindProvidersAsync(ctx context.Context, key cid.Cid, count int) <-chan peer.AddrInfo {
-	fmt.Println("Entered FindProvidersAsync function in custom go-libp2p: cid ", key, ", hash:", key.Hash())
+	fmt.Println("FindProvidersAsync: cid ", key, ", hash:", key.Hash())
 
 	if !dht.enableProviders || !key.Defined() {
 		peerOut := make(chan peer.AddrInfo)
@@ -676,7 +676,7 @@ func (dht *IpfsDHT) findProvidersAsyncRoutine(ctx context.Context, key multihash
 
 // FindPeer searches for a peer with given ID.
 func (dht *IpfsDHT) FindPeer(ctx context.Context, id peer.ID) (_ peer.AddrInfo, err error) {
-	fmt.Println("Entered FindPeer function in custom go-libp2p: peerid ", id)
+	fmt.Println("FindPeer: peerid ", id)
 
 	if err := id.Validate(); err != nil {
 		return peer.AddrInfo{}, err
