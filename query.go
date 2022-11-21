@@ -145,77 +145,6 @@ processFollowUp:
 	return lookupRes, nil
 }
 
-func (dht *IpfsDHT) runLookupWithFollowupExtend(ctx context.Context, target string, queryFn queryFn, stopFn stopFn, numPeers int) (*lookupWithFollowupResult, error) {
-	// run the query
-	lookupRes, err := dht.runQueryExtend(ctx, target, queryFn, stopFn, numPeers)
-	if err != nil {
-		return nil, err
-	}
-
-	// query all of the top K peers we've either Heard about or have outstanding queries we're Waiting on.
-	// This ensures that all of the top K results have been queried which adds to resiliency against churn for query
-	// functions that carry state (e.g. FindProviders and GetValue) as well as establish connections that are needed
-	// by stateless query functions (e.g. GetClosestPeers and therefore Provide and PutValue)
-	bestPeers := lookupRes.peers[:dht.bucketSize]
-	bestStates := lookupRes.state[:dht.bucketSize]
-	queryPeers := make([]peer.ID, 0, len(bestPeers))
-	for i, p := range bestPeers {
-		if state := bestStates[i]; state == qpeerset.PeerHeard || state == qpeerset.PeerWaiting {
-			queryPeers = append(queryPeers, p)
-		}
-	}
-
-	if len(queryPeers) == 0 {
-		return lookupRes, nil
-	}
-
-	// return if the lookup has been externally stopped
-	if ctx.Err() != nil || stopFn() {
-		lookupRes.completed = false
-		return lookupRes, nil
-	}
-
-	doneCh := make(chan struct{}, len(queryPeers))
-	followUpCtx, cancelFollowUp := context.WithCancel(ctx)
-	defer cancelFollowUp()
-	for _, p := range queryPeers {
-		qp := p
-		go func() {
-			_, _ = queryFn(followUpCtx, qp)
-			doneCh <- struct{}{}
-		}()
-	}
-
-	// wait for all queries to complete before returning, aborting ongoing queries if we've been externally stopped
-	followupsCompleted := 0
-processFollowUp:
-	for i := 0; i < len(queryPeers); i++ {
-		select {
-		case <-doneCh:
-			followupsCompleted++
-			if stopFn() {
-				cancelFollowUp()
-				if i < len(queryPeers)-1 {
-					lookupRes.completed = false
-				}
-				break processFollowUp
-			}
-		case <-ctx.Done():
-			lookupRes.completed = false
-			cancelFollowUp()
-			break processFollowUp
-		}
-	}
-
-	if !lookupRes.completed {
-		for i := followupsCompleted; i < len(queryPeers); i++ {
-			<-doneCh
-		}
-	}
-
-	return lookupRes, nil
-}
-
 func (dht *IpfsDHT) runQuery(ctx context.Context, target string, queryFn queryFn, stopFn stopFn) (*lookupWithFollowupResult, error) {
 	// pick the K closest peers to the key in our Routing table.
 	targetKadID := kb.ConvertKey(target)
@@ -252,42 +181,6 @@ func (dht *IpfsDHT) runQuery(ctx context.Context, target string, queryFn queryFn
 	return res, nil
 }
 
-func (dht *IpfsDHT) runQueryExtend(ctx context.Context, target string, queryFn queryFn, stopFn stopFn, numPeers int) (*lookupWithFollowupResult, error) {
-	// pick the K closest peers to the key in our Routing table.
-	targetKadID := kb.ConvertKey(target)
-	seedPeers := dht.routingTable.NearestPeers(targetKadID, dht.bucketSize)
-	if len(seedPeers) == 0 {
-		routing.PublishQueryEvent(ctx, &routing.QueryEvent{
-			Type:  routing.QueryError,
-			Extra: kb.ErrLookupFailure.Error(),
-		})
-		return nil, kb.ErrLookupFailure
-	}
-
-	q := &query{
-		id:         uuid.New(),
-		key:        target,
-		ctx:        ctx,
-		dht:        dht,
-		queryPeers: qpeerset.NewQueryPeerset(target),
-		seedPeers:  seedPeers,
-		peerTimes:  make(map[peer.ID]time.Duration),
-		terminated: false,
-		queryFn:    queryFn,
-		stopFn:     stopFn,
-	}
-
-	// run the query
-	q.run()
-
-	if ctx.Err() == nil {
-		q.recordValuablePeers()
-	}
-
-	res := q.constructLookupResultExtend(targetKadID, numPeers)
-	return res, nil
-}
-
 func (q *query) recordPeerIsValuable(p peer.ID) {
 	if !q.dht.routingTable.UpdateLastUsefulAt(p, time.Now()) {
 		// not in routing table
@@ -315,7 +208,6 @@ func (q *query) recordValuablePeers() {
 }
 
 // constructLookupResult takes the query information and uses it to construct the lookup result
-// Can replace with q.constructLookupResultExtend(q.dht.bucketSize, target)
 func (q *query) constructLookupResult(target kb.ID) *lookupWithFollowupResult {
 	// determine if the query terminated early
 	completed := true
@@ -341,48 +233,6 @@ func (q *query) constructLookupResult(target kb.ID) *lookupWithFollowupResult {
 	sortedPeers := kb.SortClosestPeers(peers, target)
 	if len(sortedPeers) > q.dht.bucketSize {
 		sortedPeers = sortedPeers[:q.dht.bucketSize]
-	}
-
-	// return the top K not unreachable peers as well as their states at the end of the query
-	res := &lookupWithFollowupResult{
-		peers:     sortedPeers,
-		state:     make([]qpeerset.PeerState, len(sortedPeers)),
-		completed: completed,
-	}
-
-	for i, p := range sortedPeers {
-		res.state[i] = peerState[p]
-	}
-
-	return res
-}
-
-func (q *query) constructLookupResultExtend(target kb.ID, numPeers int) *lookupWithFollowupResult {
-	// determine if the query terminated early
-	completed := true
-
-	// Lookup and starvation are both valid ways for a lookup to complete. (Starvation does not imply failure.)
-	// Lookup termination (as defined in isLookupTermination) is not possible in small networks.
-	// Starvation is a successful query termination in small networks.
-	if !(q.isLookupTermination() || q.isStarvationTermination()) {
-		completed = false
-	}
-
-	// extract the top K not unreachable peers
-	var peers []peer.ID
-	peerState := make(map[peer.ID]qpeerset.PeerState)
-	qp := q.queryPeers.GetClosestNInStates(numPeers, qpeerset.PeerHeard, qpeerset.PeerWaiting, qpeerset.PeerQueried)
-	for _, p := range qp {
-		state := q.queryPeers.GetState(p)
-		peerState[p] = state
-		peers = append(peers, p)
-	}
-
-	// Why are we sorting and truncating the list of peers again???
-	// get the top K overall peers
-	sortedPeers := kb.SortClosestPeers(peers, target)
-	if len(sortedPeers) > numPeers {
-		sortedPeers = sortedPeers[:numPeers]
 	}
 
 	// return the top K not unreachable peers as well as their states at the end of the query

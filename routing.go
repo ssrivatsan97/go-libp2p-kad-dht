@@ -374,7 +374,7 @@ func (dht *IpfsDHT) eclipseDetection(ctx context.Context, keyMH multihash.Multih
 
 	// Here, get closest peers for a random id in each bucket, add it to track for network size estimation, then estimate network size, then calculate L accordingly.
 	fmt.Println("First estimating network size. This may take some time...")
-	const numSamples = 5
+	const numSamples = 16
 	for cpl := 0; cpl < numSamples; cpl++ {
 		// fmt.Println("Common prefix length = ", cpl)
 		randId, err := dht.routingTable.GenRandPeerID(uint(cpl))
@@ -436,13 +436,12 @@ func (dht *IpfsDHT) eclipseDetection(ctx context.Context, keyMH multihash.Multih
 
 // Provide makes this node announce that it can provide a value for the given key
 
-// THIS FUNCTION IS TEMPORARILY MODIFIED TO ONLY DO ECLIPSE DETECTION AND NO PROVIDE
 func (dht *IpfsDHT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (err error) {
 	dht.providerLk.Lock()         // TODO(Srivatsan): This is just to prevent concurrent provides from annoying me for now. Will be removed later
 	defer dht.providerLk.Unlock() // TODO(Srivatsan): This is just to prevent concurrent provides from annoying me for now. Will be removed later
 
 	keyMH := key.Hash()
-	fmt.Println("Provide: cid", key, ", hash:", keyMH)
+	// fmt.Println("Provide: cid", key, ", hash:", keyMH)
 
 	if !dht.enableProviders {
 		return routing.ErrNotSupported
@@ -479,7 +478,8 @@ func (dht *IpfsDHT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (err 
 	}
 
 	var exceededDeadline bool
-	peers, err := dht.GetClosestPeersExtend(closerCtx, string(keyMH), defaultEclipseDetectionK)
+	// peers, err := dht.GetClosestPeers(closerCtx, string(keyMH))
+	peers, err := dht.GetPeersWithCPL(closerCtx, string(keyMH), 9)
 	switch err {
 	case context.DeadlineExceeded:
 		// If the _inner_ deadline has been exceeded but the _outer_
@@ -494,19 +494,28 @@ func (dht *IpfsDHT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (err 
 		return err
 	}
 
-	wg := sync.WaitGroup{}
-	for _, p := range peers {
-		wg.Add(1)
-		go func(p peer.ID) {
-			defer wg.Done()
-			logger.Debugf("putProvider(%s, %s)", internal.LoggableProviderRecordBytes(keyMH), p)
-			err := dht.protoMessenger.PutProvider(ctx, p, keyMH, dht.host)
-			if err != nil {
-				logger.Debug(err)
-			}
-		}(p)
+	fmt.Printf("CID hash: %x\n", []byte(kb.ConvertKey(string(keyMH))))
+	fmt.Println("Closest peers: ")
+	for _, pid := range peers {
+		c := []byte(kb.ConvertKey(string(pid)))
+		fmt.Printf("%x\n", c)
 	}
-	wg.Wait()
+
+	/*
+		wg := sync.WaitGroup{}
+		for _, p := range peers {
+			wg.Add(1)
+			go func(p peer.ID) {
+				defer wg.Done()
+				logger.Debugf("putProvider(%s, %s)", internal.LoggableProviderRecordBytes(keyMH), p)
+				err := dht.protoMessenger.PutProvider(ctx, p, keyMH, dht.host)
+				if err != nil {
+					logger.Debug(err)
+				}
+			}(p)
+		}
+		wg.Wait()
+	*/
 	if exceededDeadline {
 		return context.DeadlineExceeded
 	}
@@ -659,14 +668,14 @@ func (dht *IpfsDHT) findProvidersAsyncRoutine(ctx context.Context, key multihash
 
 	// Check here also for eclipse attacks, maybe. But why is this function using multihash instead of key? :(
 	if lookupRes != nil {
-		fmt.Println("Found providers: ", (*lookupRes).peers)
-		// No, it's okay :)
+		// fmt.Println("Found providers: ")
+		// for i := range (*lookupRes).peers {
+		// 	fmt.Println((*lookupRes).peers[i])
+		// }
 		_, e := dht.eclipseDetection(ctx, key, (*lookupRes).peers)
 		if e != nil {
 			fmt.Println(e)
 		}
-	} else {
-		fmt.Println("lookupRes was nil!")
 	}
 
 	if err == nil && ctx.Err() == nil {
