@@ -478,8 +478,8 @@ func (dht *IpfsDHT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (err 
 	}
 
 	var exceededDeadline bool
-	// peers, err := dht.GetClosestPeers(closerCtx, string(keyMH))
-	peers, err := dht.GetPeersWithCPL(closerCtx, string(keyMH), 9)
+	peers, err := dht.GetClosestPeers(closerCtx, string(keyMH))
+	// peers, err := dht.GetPeersWithCPL(closerCtx, string(keyMH), 9)
 	switch err {
 	case context.DeadlineExceeded:
 		// If the _inner_ deadline has been exceeded but the _outer_
@@ -501,21 +501,19 @@ func (dht *IpfsDHT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (err 
 		fmt.Printf("%x\n", c)
 	}
 
-	/*
-		wg := sync.WaitGroup{}
-		for _, p := range peers {
-			wg.Add(1)
-			go func(p peer.ID) {
-				defer wg.Done()
-				logger.Debugf("putProvider(%s, %s)", internal.LoggableProviderRecordBytes(keyMH), p)
-				err := dht.protoMessenger.PutProvider(ctx, p, keyMH, dht.host)
-				if err != nil {
-					logger.Debug(err)
-				}
-			}(p)
-		}
-		wg.Wait()
-	*/
+	wg := sync.WaitGroup{}
+	for _, p := range peers {
+		wg.Add(1)
+		go func(p peer.ID) {
+			defer wg.Done()
+			logger.Debugf("putProvider(%s, %s)", internal.LoggableProviderRecordBytes(keyMH), p)
+			err := dht.protoMessenger.PutProvider(ctx, p, keyMH, dht.host)
+			if err != nil {
+				logger.Debug(err)
+			}
+		}(p)
+	}
+	wg.Wait()
 	if exceededDeadline {
 		return context.DeadlineExceeded
 	}
