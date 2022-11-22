@@ -441,7 +441,7 @@ func (dht *IpfsDHT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (err 
 	defer dht.providerLk.Unlock() // TODO(Srivatsan): This is just to prevent concurrent provides from annoying me for now. Will be removed later
 
 	keyMH := key.Hash()
-	// fmt.Println("Provide: cid", key, ", hash:", keyMH)
+	fmt.Println("Provide: cid", key, ", hash:", keyMH)
 
 	if !dht.enableProviders {
 		return routing.ErrNotSupported
@@ -478,8 +478,15 @@ func (dht *IpfsDHT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (err 
 	}
 
 	var exceededDeadline bool
-	peers, err := dht.GetClosestPeers(closerCtx, string(keyMH))
-	// peers, err := dht.GetPeersWithCPL(closerCtx, string(keyMH), 9)
+	// peers, err := dht.GetClosestPeers(closerCtx, string(keyMH))
+	minCPL := 9
+	// peers, err := dht.GetPeersWithCPL(closerCtx, string(keyMH), minCPL)
+	distanceBytes := make([]byte, 32)
+	distanceBytes[minCPL/8] = 255 >> (minCPL % 8)
+	for i := minCPL/8 + 1; i < 32; i++ {
+		distanceBytes[i] = 255
+	}
+	peers, err := dht.GetPeersWithDistance(closerCtx, string(keyMH), distanceBytes)
 	switch err {
 	case context.DeadlineExceeded:
 		// If the _inner_ deadline has been exceeded but the _outer_
@@ -493,6 +500,8 @@ func (dht *IpfsDHT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (err 
 	default:
 		return err
 	}
+	_ = exceededDeadline
+	_ = peers
 
 	fmt.Printf("CID hash: %x\n", []byte(kb.ConvertKey(string(keyMH))))
 	fmt.Println("Closest peers: ")
