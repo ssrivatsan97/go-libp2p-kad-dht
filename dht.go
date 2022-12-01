@@ -335,9 +335,6 @@ func makeDHT(ctx context.Context, h host.Host, cfg dhtcfg.Config) (*IpfsDHT, err
 	dht.routingTable = rt
 	dht.bootstrapPeers = cfg.BootstrapPeers
 
-	// init network size estimator
-	dht.nsEstimator = netsize.NewEstimator(h.ID(), rt, cfg.BucketSize)
-
 	// rt refresh manager
 	rtRefresh, err := makeRtRefreshManager(dht, cfg, maxLastSuccessfulOutboundThreshold)
 	if err != nil {
@@ -365,6 +362,9 @@ func makeDHT(ctx context.Context, h host.Host, cfg dhtcfg.Config) (*IpfsDHT, err
 	}
 
 	dht.rtFreezeTimeout = rtFreezeTimeout
+
+	// init network size estimator
+	dht.nsEstimator = netsize.NewEstimator(h.ID(), rt, cfg.BucketSize)
 
 	dht.addDetector() // TODO: Later, this may be made optional
 
@@ -481,7 +481,6 @@ func (dht *IpfsDHT) fixLowPeersRoutine(proc goprocess.Process) {
 
 		dht.fixLowPeers(dht.Context())
 	}
-
 }
 
 // fixLowPeers tries to get more peers into the routing table if we're below the threshold
@@ -869,4 +868,30 @@ func (dht *IpfsDHT) maybeAddAddrs(p peer.ID, addrs []ma.Multiaddr, ttl time.Dura
 
 func (dht *IpfsDHT) addDetector() {
 	dht.detector = detection.New(defaultEclipseDetectionK)
+}
+
+func (dht *IpfsDHT) GatherNetsizeData() {
+	fmt.Println("Doing a few queries to initialize the netsize estimator. This may take some time...")
+	const numSamples = 10
+	ctx := dht.Context()
+	for cpl := 0; cpl < numSamples; cpl++ {
+		randId, err := dht.routingTable.GenRandPeerID(uint(cpl))
+		if err != nil {
+			// fmt.Printf("Error in generating random peer id for CPL = %v\n", cpl)
+			fmt.Println(err)
+		}
+		closestPeers, err := dht.GetClosestPeers(ctx, string(randId))
+		_ = closestPeers
+		if err != nil {
+			// fmt.Printf("Error in getting closest peers for random id %s\n", randId)
+			fmt.Println(err)
+		}
+	}
+	// fmt.Println("Completed initialization of netsize estimator.")
+	// netsize, err := dht.nsEstimator.NetworkSize()
+	// if err == nil {
+	// 	fmt.Println("Estimated network size:", netsize)
+	// } else {
+	// 	fmt.Println("But, error:", err)
+	// }
 }
