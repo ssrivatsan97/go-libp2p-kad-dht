@@ -373,7 +373,7 @@ func (dht *IpfsDHT) refreshRTIfNoShortcut(key kb.ID, lookupRes *lookupWithFollow
 	}
 }
 
-func (dht *IpfsDHT) eclipseDetection(ctx context.Context, keyMH multihash.Multihash, peers []peer.ID) (bool, error) {
+func (dht *IpfsDHT) EclipseDetection(ctx context.Context, keyMH multihash.Multihash, peers []peer.ID) (bool, error) {
 	if len(peers) < defaultEclipseDetectionK {
 		return false, fmt.Errorf("Not enough peers for eclipse detection. Expected: %d, found: %d\n", defaultEclipseDetectionK, len(peers))
 	}
@@ -404,15 +404,15 @@ func (dht *IpfsDHT) eclipseDetection(ctx context.Context, keyMH multihash.Multih
 	fmt.Println("Estimated threshold as", threshold)
 
 	targetBytes := []byte(kb.ConvertKey(string(keyMH)))
-	fmt.Println("Eclipse attack detection for id hash:", keyMH)
-	fmt.Printf("CID in the DHT keyspace: %x \n", targetBytes)
+	// fmt.Println("Eclipse attack detection for id hash:", keyMH)
+	// fmt.Printf("CID in the DHT keyspace: %x \n", targetBytes)
 	peeridsBytes := make([][]byte, len(peers))
-	fmt.Println("Number of peers obtained: ", len(peers))
-	for i := range peeridsBytes {
-		peeridsBytes[i] = []byte(kb.ConvertKey(string(peers[i])))
-		fmt.Printf("%s %x \n", peers[i], peeridsBytes[i])
+	// fmt.Println("Number of peers obtained: ", len(peers))
+	// for i := range peeridsBytes {
+		// peeridsBytes[i] = []byte(kb.ConvertKey(string(peers[i])))
+		// fmt.Printf("%s %x \n", peers[i], peeridsBytes[i])
 		// fmt.Printf("%s \n", peers[i])
-	}
+	// }
 
 	counts := dht.detector.ComputePrefixLenCounts(targetBytes, peeridsBytes)
 	kl := dht.detector.ComputeKLFromCounts(counts)
@@ -548,7 +548,7 @@ func (dht *IpfsDHT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (err 
 		return context.DeadlineExceeded
 	}
 
-	_, e := dht.eclipseDetection(ctx, keyMH, peers)
+	_, e := dht.EclipseDetection(ctx, keyMH, peers)
 	if e != nil {
 		return e
 	}
@@ -739,7 +739,7 @@ func (dht *IpfsDHT) findProvidersAsyncRoutine(ctx context.Context, key multihash
 		// 	fmt.Println(peers[i])
 		// }
 
-		_, e := dht.eclipseDetection(ctx, key, peers)
+		_, e := dht.EclipseDetection(ctx, key, peers)
 		if e != nil {
 			fmt.Println(e)
 		}
