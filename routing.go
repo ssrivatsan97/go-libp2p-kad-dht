@@ -407,12 +407,12 @@ func (dht *IpfsDHT) EclipseDetection(ctx context.Context, keyMH multihash.Multih
 	// fmt.Println("Eclipse attack detection for id hash:", keyMH)
 	// fmt.Printf("CID in the DHT keyspace: %x \n", targetBytes)
 	peeridsBytes := make([][]byte, len(peers))
-	// fmt.Println("Number of peers obtained: ", len(peers))
-	// for i := range peeridsBytes {
-		// peeridsBytes[i] = []byte(kb.ConvertKey(string(peers[i])))
+	//fmt.Println("Number of peers obtained: ", len(peers))
+	for i := range peeridsBytes {
+		peeridsBytes[i] = []byte(kb.ConvertKey(string(peers[i])))
 		// fmt.Printf("%s %x \n", peers[i], peeridsBytes[i])
 		// fmt.Printf("%s \n", peers[i])
-	// }
+	}
 
 	counts := dht.detector.ComputePrefixLenCounts(targetBytes, peeridsBytes)
 	kl := dht.detector.ComputeKLFromCounts(counts)
