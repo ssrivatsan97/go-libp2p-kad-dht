@@ -499,7 +499,9 @@ func (dht *IpfsDHT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (err 
 		// Then calculate the minimum common prefix length of all peerids within that distance
 		minCPL := int(math.Ceil(math.Log2(netsize/float64(specialProvideNumber)))) - 1
 		fmt.Println("Providing cid", key, ", hash:", keyMH, "to all peers with CPL", minCPL)
-		peers, err = dht.GetPeersWithCPLGet(closerCtx, string(keyMH), minCPL)
+		var numLookups int
+		peers, numLookups, err = dht.GetPeersWithCPLGet(closerCtx, string(keyMH), minCPL)
+		fmt.Println("Provide", key, "took", numLookups, "lookups.")
 	} else {
 		if netsizeErr != nil {
 			fmt.Println("Defaulting to regular provide operation due to error in netsize estimation:", netsizeErr)
@@ -715,12 +717,14 @@ func (dht *IpfsDHT) findProvidersAsyncRoutine(ctx context.Context, key multihash
 	if enableSpecialProvide && netsizeErr == nil {
 		minCPL := int(math.Ceil(math.Log2(netsize/float64(specialProvideNumber)))) - 1
 		fmt.Println("Finding providers from all peers with CPL", minCPL)
-		peers, err = dht.GetPeersWithCPL(ctx, string(key), minCPL, requestFn)
+		var numLookups int
+		peers, numLookups, err = dht.GetPeersWithCPL(ctx, string(key), minCPL, requestFn)
 		if err != nil {
 			fmt.Println("Error in wider lookup for cid", key)
 			fmt.Println(err)
 			return
 		}
+		fmt.Println("FindProviders for", key, "took", numLookups, "lookups.")
 	} else {
 		if netsizeErr != nil {
 			fmt.Println("Defaulting to regular FindProviders operation due to error in netsize estimation:", netsizeErr)

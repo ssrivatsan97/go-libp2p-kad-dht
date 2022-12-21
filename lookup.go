@@ -66,22 +66,23 @@ func (dht *IpfsDHT) GetClosestPeers(ctx context.Context, key string) ([]peer.ID,
 	return lookupRes.peers, ctx.Err()
 }
 
-func (dht *IpfsDHT) GetPeersWithCPLGet(ctx context.Context, key string, minCPL int) ([]peer.ID, error) {
+func (dht *IpfsDHT) GetPeersWithCPLGet(ctx context.Context, key string, minCPL int) ([]peer.ID, int, error) {
 	return dht.GetPeersWithCPL(ctx, key, minCPL, dht.GetClosestPeers)
 }
 
 // Function to find all peers with common prefix length >= minCPL with key
-func (dht *IpfsDHT) GetPeersWithCPL(ctx context.Context, key string, minCPL int, requestFn requestFn) ([]peer.ID, error) {
+func (dht *IpfsDHT) GetPeersWithCPL(ctx context.Context, key string, minCPL int, requestFn requestFn) ([]peer.ID, int, error) {
 	// Input validation
 	if minCPL < 0 {
 		minCPL = 0
 	}
-
+	numLookups := 0
 	// set, err := dht.GetClosestPeers(ctx, key)
 	set, err := requestFn(ctx, key)
 	if err != nil {
-		return nil, err
+		return nil, numLookups, err
 	}
+	numLookups += 1
 	// fmt.Printf("Get peers with CPL %d  for %x\n", minCPL, []byte(kb.ConvertKey(key)))
 	// fmt.Println("From first query:", len(set), "peers")
 	cpl := minCommonPrefixLength(set, key)
@@ -90,7 +91,7 @@ func (dht *IpfsDHT) GetPeersWithCPL(ctx context.Context, key string, minCPL int,
 	if cpl >= minCPL {
 		rt, err = kb.NewRoutingTable(20, kb.ConvertKey(key), time.Minute, dht.host.Peerstore(), time.Minute, nil)
 		if err != nil {
-			return nil, err
+			return nil, numLookups, err
 		}
 	}
 	for cpl >= minCPL {
@@ -99,13 +100,14 @@ func (dht *IpfsDHT) GetPeersWithCPL(ctx context.Context, key string, minCPL int,
 		if cpl <= 15 { // This condition is because I can only generate random peerid with common prefix length <= 15
 			queryPeerID, err = rt.GenRandPeerID(uint(cpl))
 			if err != nil {
-				return nil, err
+				return nil, numLookups, err
 			}
 			// fmt.Printf("CPL: %d, Generated peerid: %x\n", cpl, kb.ConvertPeerID(queryPeerID))
-			newSet, err := dht.GetPeersWithCPL(ctx, string(queryPeerID), cpl+1, requestFn)
+			newSet, addLookups, err := dht.GetPeersWithCPL(ctx, string(queryPeerID), cpl+1, requestFn)
 			if err != nil {
-				return nil, err
+				return nil, numLookups, err
 			}
+			numLookups += addLookups
 			set = append(set, newSet...)
 			cpl -= 1
 		} else {
@@ -117,8 +119,9 @@ func (dht *IpfsDHT) GetPeersWithCPL(ctx context.Context, key string, minCPL int,
 			// newSet, err := dht.GetClosestPeers(ctx, string(queryPeerID))
 			newSet, err := requestFn(ctx, string(queryPeerID))
 			if err != nil {
-				return nil, err
+				return nil, numLookups, err
 			}
+			numLookups += 1
 			set = append(set, newSet...)
 			// cpl = minCommonPrefixLength(set, key)
 			cpl -= 1 // This does not guarantee correctness, but prevents an infinite loop!
@@ -134,7 +137,7 @@ func (dht *IpfsDHT) GetPeersWithCPL(ctx context.Context, key string, minCPL int,
 	}
 	// Sort by distance before returning
 	sortedSet := kb.SortClosestPeers(truncSet, kb.ConvertKey(key))
-	return sortedSet, nil
+	return sortedSet, numLookups, nil
 	// Will probably be more efficient to truncate after sorting so that it could be done by a binary search
 }
 
@@ -147,11 +150,11 @@ func (dht *IpfsDHT) GetPeersWithCPL(ctx context.Context, key string, minCPL int,
 // This inefficiency is because we are unable to query any chosen queryKey, but can only query peerids generated from GenRandPeerID()
 // For now, it is recommended that you look for peers within distance where distance = 2^m - 1 for some m,
 // and for that use GetPeersWithCPL(key, 256 - m) instead of GetPeersWithDistance.
-func (dht *IpfsDHT) GetPeersWithDistance(ctx context.Context, key string, maxDist []byte, requestFn requestFn) ([]peer.ID, error) {
+func (dht *IpfsDHT) GetPeersWithDistance(ctx context.Context, key string, maxDist []byte, requestFn requestFn) ([]peer.ID, int, error) {
 	minCPL := kb.CommonPrefixLen(maxDist, make([]byte, 32))
-	set, err := dht.GetPeersWithCPL(ctx, key, minCPL, requestFn)
+	set, numLookups, err := dht.GetPeersWithCPL(ctx, key, minCPL, requestFn)
 	if err != nil {
-		return nil, err
+		return nil, numLookups, err
 	}
 	// Keep only those with required distance
 	truncSet := make([]peer.ID, 0, len(set))
@@ -165,7 +168,7 @@ func (dht *IpfsDHT) GetPeersWithDistance(ctx context.Context, key string, maxDis
 	}
 	// Sort by distance before returning
 	sortedSet := kb.SortClosestPeers(truncSet, kb.ConvertKey(key))
-	return sortedSet, nil
+	return sortedSet, numLookups, nil
 	// Will probably be more efficient to truncate after sorting so that it could be done by a binary search
 }
 
