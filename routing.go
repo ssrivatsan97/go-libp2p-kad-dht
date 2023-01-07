@@ -382,7 +382,7 @@ func (dht *IpfsDHT) EclipseDetection(ctx context.Context, keyMH multihash.Multih
 	}
 
 	// Eclipse attack detection here
-	fmt.Println("Testing cid hash", keyMH, "for eclipse attack...")
+	// fmt.Println("Testing cid hash", keyMH, "for eclipse attack...")
 	if dht.detector == nil {
 		return false, fmt.Errorf("Detector not initialized!")
 	}
@@ -416,9 +416,10 @@ func (dht *IpfsDHT) EclipseDetection(ctx context.Context, keyMH multihash.Multih
 
 	counts := dht.detector.ComputePrefixLenCounts(targetBytes, peeridsBytes)
 	kl := dht.detector.ComputeKLFromCounts(counts)
-	fmt.Println("Counts: ", counts)
-	fmt.Println("KL divergence: ", kl)
+	fmt.Println("Counts:", counts)
+	fmt.Println("KL divergence:", kl)
 	result := dht.detector.DetectFromKL(kl)
+	fmt.Println("Eclipse detection result:", result)
 	var resultStr string
 	if result {
 		resultStr = "possible attack"
