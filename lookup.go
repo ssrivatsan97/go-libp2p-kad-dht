@@ -128,11 +128,15 @@ func (dht *IpfsDHT) GetPeersWithCPL(ctx context.Context, key string, minCPL int,
 		}
 
 	}
-	// Keep only those with required common prefix length
+	// Remove duplicates and keep only those with required common prefix length
+	setMap := make(map[peer.ID]struct{})
 	truncSet := make([]peer.ID, 0, len(set))
 	for _, id := range set {
-		if kb.CommonPrefixLen(kb.ConvertPeerID(id), kb.ConvertKey(key)) >= minCPL {
-			truncSet = append(truncSet, id)
+		if _, ok := setMap[id]; !ok {
+			if kb.CommonPrefixLen(kb.ConvertPeerID(id), kb.ConvertKey(key)) >= minCPL {
+				setMap[id] = struct{}{}
+				truncSet = append(truncSet, id)
+			}
 		}
 	}
 	// Sort by distance before returning
