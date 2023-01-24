@@ -158,8 +158,9 @@ type IpfsDHT struct {
 	testAddressUpdateProcessing bool
 
 	// Used for eclipse attack detection
-	detector   *detection.EclipseDetector
-	providerLk sync.Mutex // TODO(Srivatsan): This is just to prevent concurrent provides from annoying me for now. Will be removed later
+	detector             *detection.EclipseDetector
+	providerLk           sync.Mutex // TODO(Srivatsan): This is just to prevent concurrent provides from annoying me for now. Will be removed later
+	specialProvideNumber int
 }
 
 // Assert that IPFS assumptions about interfaces aren't broken. These aren't a
@@ -367,6 +368,8 @@ func makeDHT(ctx context.Context, h host.Host, cfg dhtcfg.Config) (*IpfsDHT, err
 	dht.nsEstimator = netsize.NewEstimator(h.ID(), rt, cfg.BucketSize)
 
 	dht.addDetector() // TODO: Later, this may be made optional
+
+	dht.specialProvideNumber = 20
 
 	return dht, nil
 }
