@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"math"
 	"sync"
 	"time"
 
@@ -20,8 +21,18 @@ import (
 	kb "github.com/libp2p/go-libp2p-kbucket"
 	record "github.com/libp2p/go-libp2p-record"
 	"github.com/multiformats/go-multihash"
-	detection "github.com/ssrivatsan97/go-libp2p-kad-dht/eclipse-detection"
 )
+
+// This flag controls whether the special provide option is invoked.
+const enableSpecialProvide = true
+
+// This parameter controls how many DHT peers are sent the provider record, in case of a detected eclipse attack,
+// The provider record is sent to all peers within the distance in which there are expected to be specialProvideNumber peers
+// const specialProvideNumber = 30
+
+func (dht *IpfsDHT) SetSpecialProvideNumber(specialProvNum int) {
+	dht.specialProvideNumber = specialProvNum
+}
 
 // This file implements the Routing interface for the IpfsDHT struct.
 
@@ -366,8 +377,6 @@ func (dht *IpfsDHT) refreshRTIfNoShortcut(key kb.ID, lookupRes *lookupWithFollow
 	}
 }
 
-<<<<<<< Updated upstream
-=======
 func (dht *IpfsDHT) EclipseDetection(ctx context.Context, keyMH multihash.Multihash, peers []peer.ID) (bool, error) {
 	if len(peers) < defaultEclipseDetectionK {
 		return false, fmt.Errorf("Not enough peers for eclipse detection. Expected: %d, found: %d\n", defaultEclipseDetectionK, len(peers))
@@ -415,26 +424,23 @@ func (dht *IpfsDHT) EclipseDetection(ctx context.Context, keyMH multihash.Multih
 	fmt.Println("KL divergence:", kl)
 	result := dht.detector.DetectFromKL(kl)
 	fmt.Println("Eclipse detection result:", result)
-	// var resultStr string
-	// if result {
-	// 	resultStr = "possible attack"
-	// } else {
-	// 	resultStr = "no attack"
-	// }
-	// fmt.Println("Eclipse attack detector says: ", resultStr, ", threshold =", threshold)
+	var resultStr string
+	if result {
+		resultStr = "possible attack"
+	} else {
+		resultStr = "no attack"
+	}
+	fmt.Println("Eclipse attack detector says: ", resultStr, ", threshold =", threshold)
 	// Eclipse attack detection code ends here
 	return result, nil
 }
 
->>>>>>> Stashed changes
 // Provider abstraction for indirect stores.
 // Some DHTs store values directly, while an indirect store stores pointers to
 // locations of the value, similarly to Coral and Mainline DHT.
 
 // Provide makes this node announce that it can provide a value for the given key
-func (dht *IpfsDHT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (err error) {
-	fmt.Println("Entered Provide function in custom go-libp2p: cid", key)
-
+func (dht *IpfsDHT) ProvideWithoutEclipseDetection(ctx context.Context, key cid.Cid, brdcst bool) (err error) {
 	if !dht.enableProviders {
 		return routing.ErrNotSupported
 	} else if !key.Defined() {
@@ -486,35 +492,6 @@ func (dht *IpfsDHT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (err 
 		return err
 	}
 
-	// Eclipse attack detection here
-	fmt.Println("Testing cid", key, "for eclipse attack...")
-	targetBytes := []byte(kb.ConvertKey(string(keyMH)))
-	fmt.Printf("Key in DHT space: %x \n", targetBytes)
-	peeridsBytes := make([][]byte, len(peers))
-	fmt.Println("Number of peers obtained: ", len(peers))
-	for i := range peeridsBytes {
-		peeridsBytes[i] = []byte(kb.ConvertKey(string(peers[i])))
-		fmt.Printf("%s %x \n", peers[i], peeridsBytes[i])
-	}
-
-	det_k := 20 // Need to fix as global config parameter later
-	// If det_k is not 20, implement getting more peers
-	det_l := 9 // Need to code the adaptive tuning mechanism
-	threshold := 1.0
-	detector := detection.New(det_k, det_l, threshold) // This would also be a global variable initialized in advance
-	counts := detector.ComputePrefixLenCounts(targetBytes, peeridsBytes)
-	kl := detector.ComputeKLFromCounts(counts)
-	fmt.Println("Counts: ", counts)
-	fmt.Println("KL divergence: ", kl)
-	var result string
-	if detector.DetectFromKL(kl) {
-		result = "possible attack"
-	} else {
-		result = "no attack"
-	}
-	fmt.Println("Eclipse attack detector says: ", result, ", threshold = ", threshold)
-	// Eclipse attack detection code ends here
-
 	wg := sync.WaitGroup{}
 	for _, p := range peers {
 		wg.Add(1)
@@ -534,9 +511,464 @@ func (dht *IpfsDHT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (err 
 	return ctx.Err()
 }
 
+// Provider abstraction for indirect stores.
+// Some DHTs store values directly, while an indirect store stores pointers to
+// locations of the value, similarly to Coral and Mainline DHT.
+
+// Provide makes this node announce that it can provide a value for the given key
+
+// Provide now runs either the usual provide operation or the "special" provide operation,
+// in which the provider record is sent to all peers within a distance expected to contain specialProvideNumber peers.
+// This is decided based on the flag enableSpecialProvide.
+// TODO later: Do special provide only if eclipse attack is detected.
+
+func (dht *IpfsDHT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (err error) {
+	dht.providerLk.Lock()         // TODO(Srivatsan): This is just to prevent concurrent provides from annoying me for now. Will be removed later
+	defer dht.providerLk.Unlock() // TODO(Srivatsan): This is just to prevent concurrent provides from annoying me for now. Will be removed later
+
+	keyMH := key.Hash()
+	fmt.Println("Provide: cid", key, ", hash:", keyMH)
+
+	if !dht.enableProviders {
+		return routing.ErrNotSupported
+	} else if !key.Defined() {
+		return fmt.Errorf("invalid cid: undefined")
+	}
+	logger.Debugw("providing", "cid", key, "mh", internal.LoggableProviderRecordBytes(keyMH))
+
+	// add self locally
+	dht.providerStore.AddProvider(ctx, keyMH, peer.AddrInfo{ID: dht.self})
+	if !brdcst {
+		return nil
+	}
+
+	closerCtx := ctx
+	if deadline, ok := ctx.Deadline(); ok {
+		now := time.Now()
+		timeout := deadline.Sub(now)
+
+		if timeout < 0 {
+			// timed out
+			return context.DeadlineExceeded
+		} else if timeout < 10*time.Second {
+			// Reserve 10% for the final put.
+			deadline = deadline.Add(-timeout / 10)
+		} else {
+			// Otherwise, reserve a second (we'll already be
+			// connected so this should be fast).
+			deadline = deadline.Add(-time.Second)
+		}
+		var cancel context.CancelFunc
+		closerCtx, cancel = context.WithDeadline(ctx, deadline)
+		defer cancel()
+	}
+
+	var exceededDeadline bool
+	var peers []peer.ID
+	var netsizeErr error
+	var netsize float64
+
+	if enableSpecialProvide {
+		netsize, netsizeErr = dht.nsEstimator.NetworkSize()
+		if netsizeErr != nil {
+			dht.GatherNetsizeData()
+			netsize, netsizeErr = dht.nsEstimator.NetworkSize()
+		}
+	}
+	if enableSpecialProvide && netsizeErr == nil {
+		// Calculate the expected maximum distance of the `specialProvideNumber` number of closest peers.
+		// Then calculate the minimum common prefix length of all peerids within that distance
+		minCPL := int(math.Ceil(math.Log2(netsize/float64(dht.specialProvideNumber)))) - 1
+		fmt.Println("Providing cid", key, ", hash:", keyMH, "to all peers with CPL", minCPL)
+		var numLookups int
+		peers, numLookups, err = dht.GetPeersWithCPLGet(closerCtx, string(keyMH), minCPL)
+		fmt.Println("Provide", key, "took", numLookups, "lookups.")
+	} else {
+		if netsizeErr != nil {
+			fmt.Println("Defaulting to regular provide operation due to error in netsize estimation:", netsizeErr)
+		}
+		peers, err = dht.GetClosestPeers(closerCtx, string(keyMH))
+	}
+
+	switch err {
+	case context.DeadlineExceeded:
+		// If the _inner_ deadline has been exceeded but the _outer_
+		// context is still fine, provide the value to the closest peers
+		// we managed to find, even if they're not the _actual_ closest peers.
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		exceededDeadline = true
+	case nil:
+	default:
+		return err
+	}
+
+	fmt.Printf("Provide CID hash: %x\n", []byte(kb.ConvertKey(string(keyMH))))
+
+	fmt.Println("Sending provider record to", len(peers), "peers:")
+	for _, pid := range peers {
+		c := []byte(kb.ConvertKey(string(pid)))
+		fmt.Printf("%x\n", c)
+	}
+
+	wg := sync.WaitGroup{}
+	for _, p := range peers {
+		wg.Add(1)
+		go func(p peer.ID) {
+			defer wg.Done()
+			logger.Debugf("putProvider(%s, %s)", internal.LoggableProviderRecordBytes(keyMH), p)
+			err := dht.protoMessenger.PutProvider(ctx, p, keyMH, dht.host)
+			if err != nil {
+				logger.Debug(err)
+			}
+		}(p)
+	}
+	wg.Wait()
+	if exceededDeadline {
+		return context.DeadlineExceeded
+	}
+
+	_, e := dht.EclipseDetection(ctx, keyMH, peers)
+	if e != nil {
+		return e
+	}
+
+	return ctx.Err()
+}
+
+func (dht *IpfsDHT) ProvideWithReturn(ctx context.Context, key cid.Cid, brdcst bool) (error, []peer.ID, int) {
+	var err error
+	dht.providerLk.Lock()         // TODO(Srivatsan): This is just to prevent concurrent provides from annoying me for now. Will be removed later
+	defer dht.providerLk.Unlock() // TODO(Srivatsan): This is just to prevent concurrent provides from annoying me for now. Will be removed later
+
+	keyMH := key.Hash()
+	fmt.Println("Provide: cid", key, ", hash:", keyMH)
+
+	if !dht.enableProviders {
+		return routing.ErrNotSupported, make([]peer.ID, 0), 0
+	} else if !key.Defined() {
+		return fmt.Errorf("invalid cid: undefined"), make([]peer.ID, 0), 0
+	}
+	logger.Debugw("providing", "cid", key, "mh", internal.LoggableProviderRecordBytes(keyMH))
+
+	// add self locally
+	dht.providerStore.AddProvider(ctx, keyMH, peer.AddrInfo{ID: dht.self})
+	if !brdcst {
+		return nil, make([]peer.ID, 0), 0
+	}
+
+	closerCtx := ctx
+	if deadline, ok := ctx.Deadline(); ok {
+		now := time.Now()
+		timeout := deadline.Sub(now)
+
+		if timeout < 0 {
+			// timed out
+			return context.DeadlineExceeded, make([]peer.ID, 0), 0
+		} else if timeout < 10*time.Second {
+			// Reserve 10% for the final put.
+			deadline = deadline.Add(-timeout / 10)
+		} else {
+			// Otherwise, reserve a second (we'll already be
+			// connected so this should be fast).
+			deadline = deadline.Add(-time.Second)
+		}
+		var cancel context.CancelFunc
+		closerCtx, cancel = context.WithDeadline(ctx, deadline)
+		defer cancel()
+	}
+
+	var exceededDeadline bool
+	var peers []peer.ID
+	var netsizeErr error
+	var netsize float64
+
+	if enableSpecialProvide {
+		netsize, netsizeErr = dht.nsEstimator.NetworkSize()
+		if netsizeErr != nil {
+			dht.GatherNetsizeData()
+			netsize, netsizeErr = dht.nsEstimator.NetworkSize()
+		}
+	}
+	var numLookups int
+	if enableSpecialProvide && netsizeErr == nil {
+		// Calculate the expected maximum distance of the `specialProvideNumber` number of closest peers.
+		// Then calculate the minimum common prefix length of all peerids within that distance
+		minCPL := int(math.Ceil(math.Log2(netsize/float64(dht.specialProvideNumber)))) - 1
+		fmt.Println("Providing cid", key, ", hash:", keyMH, "to all peers with CPL", minCPL)
+		peers, numLookups, err = dht.GetPeersWithCPLGet(closerCtx, string(keyMH), minCPL)
+		fmt.Println("Provide", key, "took", numLookups, "lookups.")
+	} else {
+		if netsizeErr != nil {
+			fmt.Println("Defaulting to regular provide operation due to error in netsize estimation:", netsizeErr)
+		}
+		peers, err = dht.GetClosestPeers(closerCtx, string(keyMH))
+	}
+
+	switch err {
+	case context.DeadlineExceeded:
+		// If the _inner_ deadline has been exceeded but the _outer_
+		// context is still fine, provide the value to the closest peers
+		// we managed to find, even if they're not the _actual_ closest peers.
+		if ctx.Err() != nil {
+			return ctx.Err(), make([]peer.ID, 0), 0
+		}
+		exceededDeadline = true
+	case nil:
+	default:
+		return err, make([]peer.ID, 0), 0
+	}
+
+	fmt.Printf("Provide CID hash: %x\n", []byte(kb.ConvertKey(string(keyMH))))
+
+	fmt.Println("Sending provider record to", len(peers), "peers:")
+	for _, pid := range peers {
+		c := []byte(kb.ConvertKey(string(pid)))
+		fmt.Printf("%x\n", c)
+	}
+
+	wg := sync.WaitGroup{}
+	for _, p := range peers {
+		wg.Add(1)
+		go func(p peer.ID) {
+			defer wg.Done()
+			logger.Debugf("putProvider(%s, %s)", internal.LoggableProviderRecordBytes(keyMH), p)
+			err := dht.protoMessenger.PutProvider(ctx, p, keyMH, dht.host)
+			if err != nil {
+				logger.Debug(err)
+			}
+		}(p)
+	}
+	wg.Wait()
+	if exceededDeadline {
+		return context.DeadlineExceeded, make([]peer.ID, 0), 0
+	}
+
+	_, e := dht.EclipseDetection(ctx, keyMH, peers)
+	if e != nil {
+		return e, make([]peer.ID, 0), 0
+	}
+
+	return ctx.Err(), peers, numLookups
+}
+
+// FindProviders searches until the context expires.
+func (dht *IpfsDHT) FindProvidersReturnOnPathNodes(ctx context.Context, c cid.Cid) ([]peer.AddrInfo, []peer.ID, error) {
+	if !dht.enableProviders {
+		return nil, nil, routing.ErrNotSupported
+	} else if !c.Defined() {
+		return nil, nil, fmt.Errorf("invalid cid: undefined")
+	}
+	fmt.Printf("[FindProvidersReturnOnPathNodes] %s", c.String())
+
+	var providers []peer.AddrInfo
+	var onpathPeers []peer.ID
+	peerOut, peersContacted := dht.FindProvidersAsyncReturnOnPathNodes(ctx, c, dht.bucketSize)
+	for p := range peerOut {
+		providers = append(providers, p)
+	}
+	for p := range peersContacted {
+		onpathPeers = append(onpathPeers, p)
+	}
+
+	fmt.Printf("[FindProviders] Find providers contacted %d providers", len(providers))
+	logger.Debugf("[FindProviders] Find providers contacted %d providers: %d", len(providers))
+
+	return providers, onpathPeers, nil
+}
+
+// FindProvidersAsync is the same thing as FindProviders, but returns a channel.
+// Peers will be returned on the channel as soon as they are found, even before
+// the search query completes. If count is zero then the query will run until it
+// completes. Note: not reading from the returned channel may block the query
+// from progressing.
+func (dht *IpfsDHT) FindProvidersAsyncReturnOnPathNodes(ctx context.Context, key cid.Cid, count int) (<-chan peer.AddrInfo, <-chan peer.ID) {
+	if !dht.enableProviders || !key.Defined() {
+		peerOut := make(chan peer.AddrInfo)
+		peersContacted := make(chan peer.ID)
+		close(peerOut)
+		close(peersContacted)
+		return peerOut, peersContacted
+	}
+
+	fmt.Printf("[FindProvidersAsyncReturnOnPathNodes] count is %d for Cid: %s \n", count, key.String())
+
+	chSize := count
+	if count == 0 {
+		chSize = 1
+	}
+	peerOut := make(chan peer.AddrInfo, chSize)
+	peersContacted := make(chan peer.ID, 2000) // XXX increase this if necessary
+
+	keyMH := key.Hash()
+
+	logger.Debugw("finding providers", "cid", key, "mh", internal.LoggableProviderRecordBytes(keyMH))
+	fmt.Printf("[FindProvidersAsyncReturnOnPathNodes] Finding providers for key: %s\n", key.String())
+	go dht.findProvidersAsyncRoutineReturnOnPathNodes(ctx, keyMH, count, peerOut, peersContacted)
+
+	return peerOut, peersContacted
+}
+
+func (dht *IpfsDHT) findProvidersAsyncRoutineReturnOnPathNodes(ctx context.Context, key multihash.Multihash, count int, peerOut chan peer.AddrInfo, peersContacted chan peer.ID) {
+	defer close(peerOut)
+	defer close(peersContacted)
+
+	findAll := count == 0
+
+	ps := make(map[peer.ID]struct{})
+	psLock := &sync.Mutex{}
+	psTryAdd := func(p peer.ID) bool {
+		psLock.Lock()
+		defer psLock.Unlock()
+		_, ok := ps[p]
+		if !ok && (len(ps) < count || findAll) {
+			ps[p] = struct{}{}
+			return true
+		}
+		return false
+	}
+	psSize := func() int {
+		psLock.Lock()
+		defer psLock.Unlock()
+		return len(ps)
+	}
+
+	provs, err := dht.providerStore.GetProviders(ctx, key)
+	if err != nil {
+		return
+	}
+	for _, p := range provs {
+		// NOTE: Assuming that this list of peers is unique
+		if psTryAdd(p.ID) {
+			select {
+			case peerOut <- p:
+			case <-ctx.Done():
+				return
+			}
+		}
+
+		// If we have enough peers locally, don't bother with remote RPC
+		// TODO: is this a DOS vector?
+		if !findAll && len(ps) >= count {
+			return
+		}
+	}
+	queryCounter := 0
+	var mutex sync.Mutex
+
+	requestFn := func(ctx context.Context, keyStr string) ([]peer.ID, error) {
+		lookupRes, err := dht.runLookupWithFollowup(ctx, string(key),
+			func(ctx context.Context, p peer.ID) ([]*peer.AddrInfo, error) {
+				// For DHT query command
+				routing.PublishQueryEvent(ctx, &routing.QueryEvent{
+					Type: routing.SendingQuery,
+					ID:   p,
+				})
+				mutex.Lock()
+				queryCounter += 1
+				fmt.Printf("%d [runLookupWithFollowup] GetProviders sent to peer: %s for key: %s\n", queryCounter, peer.Encode(p), key.B58String())
+				mutex.Unlock()
+				select {
+				case peersContacted <- p:
+				}
+
+				provs, closest, err := dht.protoMessenger.GetProviders(ctx, p, key)
+				if err != nil {
+					return nil, err
+				}
+
+				logger.Debugf("%d provider entries", len(provs))
+
+				// Add unique providers from request, up to 'count'
+				for _, prov := range provs {
+					dht.maybeAddAddrs(prov.ID, prov.Addrs, peerstore.TempAddrTTL)
+					logger.Debugf("got provider: %s", prov)
+					if psTryAdd(prov.ID) {
+						logger.Debugf("using provider: %s", prov)
+						select {
+						case peerOut <- *prov:
+						case <-ctx.Done():
+							logger.Debug("context timed out sending more providers")
+							return nil, ctx.Err()
+						}
+					}
+					if !findAll && psSize() >= count {
+						logger.Debugf("got enough providers (%d/%d)", psSize(), count)
+						return nil, nil
+					}
+				}
+
+				// Give closer peers back to the query to be queried
+				logger.Debugf("got closer peers: %d %s", len(closest), closest)
+
+				routing.PublishQueryEvent(ctx, &routing.QueryEvent{
+					Type:      routing.PeerResponse,
+					ID:        p,
+					Responses: closest,
+				})
+
+				return closest, nil
+			},
+			func() bool {
+				return !findAll && psSize() >= count
+			},
+		)
+
+		if err == nil && ctx.Err() == nil && lookupRes.completed {
+			dht.routingTable.ResetCplRefreshedAtForID(kb.ConvertKey(string(key)), time.Now())
+		}
+		if lookupRes != nil {
+			return (*lookupRes).peers, err
+		} else {
+			return nil, err
+		}
+	}
+	var peers []peer.ID
+	var netsize float64
+	var netsizeErr error
+	if enableSpecialProvide {
+		netsize, netsizeErr = dht.nsEstimator.NetworkSize()
+		if netsizeErr != nil {
+			dht.GatherNetsizeData()
+			netsize, netsizeErr = dht.nsEstimator.NetworkSize()
+		}
+	}
+	if enableSpecialProvide && netsizeErr == nil {
+		minCPL := int(math.Ceil(math.Log2(netsize/float64(dht.specialProvideNumber)))) - 1
+		fmt.Println("Finding providers from all peers with CPL", minCPL)
+		var numLookups int
+		peers, numLookups, err = dht.GetPeersWithCPL(ctx, string(key), minCPL, requestFn)
+		if err != nil {
+			fmt.Println("Error in wider lookup for cid", key)
+			fmt.Println(err)
+			return
+		}
+		fmt.Println("FindProviders for", key, "took", numLookups, "lookups.")
+	} else {
+		if netsizeErr != nil {
+			fmt.Println("Defaulting to regular FindProviders operation due to error in netsize estimation:", netsizeErr)
+		}
+		peers, err = requestFn(ctx, string(key))
+	}
+
+	// // Check here also for eclipse attacks.
+	if peers != nil {
+		// fmt.Println("Found closest peers: ")
+		// for i := range peers {
+		// 	fmt.Println(peers[i])
+		// }
+
+		_, e := dht.EclipseDetection(ctx, key, peers)
+		if e != nil {
+			fmt.Println(e)
+		}
+	}
+}
+
 // FindProviders searches until the context expires.
 func (dht *IpfsDHT) FindProviders(ctx context.Context, c cid.Cid) ([]peer.AddrInfo, error) {
-	fmt.Println("Entered FindProviders function in custom go-libp2p: cid ", c)
+	fmt.Println("FindProviders: cid ", c, "hash:", c.Hash())
 
 	if !dht.enableProviders {
 		return nil, routing.ErrNotSupported
@@ -557,7 +989,7 @@ func (dht *IpfsDHT) FindProviders(ctx context.Context, c cid.Cid) ([]peer.AddrIn
 // completes. Note: not reading from the returned channel may block the query
 // from progressing.
 func (dht *IpfsDHT) FindProvidersAsync(ctx context.Context, key cid.Cid, count int) <-chan peer.AddrInfo {
-	fmt.Println("Entered FindProvidersAsync function in custom go-libp2p: cid ", key)
+	fmt.Println("FindProvidersAsync: cid ", key, ", hash:", key.Hash())
 
 	if !dht.enableProviders || !key.Defined() {
 		peerOut := make(chan peer.AddrInfo)
@@ -622,66 +1054,155 @@ func (dht *IpfsDHT) findProvidersAsyncRoutine(ctx context.Context, key multihash
 		}
 	}
 
-	lookupRes, err := dht.runLookupWithFollowup(ctx, string(key),
-		func(ctx context.Context, p peer.ID) ([]*peer.AddrInfo, error) {
-			// For DHT query command
-			routing.PublishQueryEvent(ctx, &routing.QueryEvent{
-				Type: routing.SendingQuery,
-				ID:   p,
-			})
+	requestFn := func(ctx context.Context, keyStr string) ([]peer.ID, error) {
+		lookupRes, err := dht.runLookupWithFollowup(ctx, keyStr,
+			func(ctx context.Context, p peer.ID) ([]*peer.AddrInfo, error) {
+				// For DHT query command
+				routing.PublishQueryEvent(ctx, &routing.QueryEvent{
+					Type: routing.SendingQuery,
+					ID:   p,
+				})
 
-			provs, closest, err := dht.protoMessenger.GetProviders(ctx, p, key)
-			if err != nil {
-				return nil, err
-			}
+				provs, closest, err := dht.protoMessenger.GetProviders(ctx, p, key)
+				if err != nil {
+					return nil, err
+				}
 
-			logger.Debugf("%d provider entries", len(provs))
+				logger.Debugf("%d provider entries", len(provs))
 
-			// Add unique providers from request, up to 'count'
-			for _, prov := range provs {
-				dht.maybeAddAddrs(prov.ID, prov.Addrs, peerstore.TempAddrTTL)
-				logger.Debugf("got provider: %s", prov)
-				if psTryAdd(prov.ID) {
-					logger.Debugf("using provider: %s", prov)
-					select {
-					case peerOut <- *prov:
-					case <-ctx.Done():
-						logger.Debug("context timed out sending more providers")
-						return nil, ctx.Err()
+				// Add unique providers from request, up to 'count'
+				for _, prov := range provs {
+					dht.maybeAddAddrs(prov.ID, prov.Addrs, peerstore.TempAddrTTL)
+					logger.Debugf("got provider: %s", prov)
+					if psTryAdd(prov.ID) {
+						logger.Debugf("using provider: %s", prov)
+						select {
+						case peerOut <- *prov:
+						case <-ctx.Done():
+							logger.Debug("context timed out sending more providers")
+							return nil, ctx.Err()
+						}
+					}
+					if !findAll && psSize() >= count {
+						logger.Debugf("got enough providers (%d/%d)", psSize(), count)
+						return nil, nil
 					}
 				}
-				if !findAll && psSize() >= count {
-					logger.Debugf("got enough providers (%d/%d)", psSize(), count)
-					return nil, nil
+
+				// Give closer peers back to the query to be queried
+				logger.Debugf("got closer peers: %d %s", len(closest), closest)
+
+				routing.PublishQueryEvent(ctx, &routing.QueryEvent{
+					Type:      routing.PeerResponse,
+					ID:        p,
+					Responses: closest,
+				})
+
+				return closest, nil
+			},
+			func() bool {
+				return !findAll && psSize() >= count
+			},
+		)
+		if err == nil && ctx.Err() == nil && lookupRes.completed {
+			dht.routingTable.ResetCplRefreshedAtForID(kb.ConvertKey(string(key)), time.Now())
+		}
+		if lookupRes != nil {
+			return (*lookupRes).peers, err
+		} else {
+			return nil, err
+		}
+	}
+
+	var peers []peer.ID
+	var netsize float64
+	var netsizeErr error
+	if enableSpecialProvide {
+		netsize, netsizeErr = dht.nsEstimator.NetworkSize()
+		if netsizeErr != nil {
+			dht.GatherNetsizeData()
+			netsize, netsizeErr = dht.nsEstimator.NetworkSize()
+		}
+	}
+	if enableSpecialProvide && netsizeErr == nil {
+		minCPL := int(math.Ceil(math.Log2(netsize/float64(dht.specialProvideNumber)))) - 1
+		fmt.Println("Finding providers from all peers with CPL", minCPL)
+		var numLookups int
+		peers, numLookups, err = dht.GetPeersWithCPL(ctx, string(key), minCPL, requestFn)
+		if err != nil {
+			fmt.Println("Error in wider lookup for cid", key)
+			fmt.Println(err)
+			return
+		}
+		fmt.Println("FindProviders for", key, "took", numLookups, "lookups.")
+	} else {
+		if netsizeErr != nil {
+			fmt.Println("Defaulting to regular FindProviders operation due to error in netsize estimation:", netsizeErr)
+		}
+		peers, err = requestFn(ctx, string(key))
+	}
+
+	// // Check here also for eclipse attacks.
+	if peers != nil {
+		fmt.Println("Found closest peers: ")
+		for i := range peers {
+			fmt.Println(peers[i])
+		}
+		sybilcidlist := []string{
+			"12D3KooWNFF7dgefegbMFHXEag5WbKQcTcpNPMnxajrbgLcnLrQs",
+			"12D3KooWHXTpLjXiFAN27SPa3fmgqvAgFisZwWRKJrzx3qgUddKQ",
+			"12D3KooWGaC4H4euySceW9ztzdBJvyEwjgz5qmmrJGkBRFXRgoGY",
+			"12D3KooWMka6i5dqgn1erywTs4rUcZB82JiXYVmVgSCcmNw8rgXb",
+			"12D3KooWQ92v3ep6QwzWKzHA2VGD73CypGyCQ1HjLNPAVSFxRER7",
+			"12D3KooWS7jcKHUxmtmBuawuCb9hrmXBy9wmvSsKEj8AVDG4NtWT",
+			"12D3KooWScmiaVCwdqu3WYYdFiZD7sFaNL1YYFQ8yUGpzqn7fwb9",
+			"12D3KooWAMQBrZj5XfT4qUXGAPpS1oBG8kd89qMUvV4ghYcm5B3e",
+			"12D3KooWCcis4uUujSGptfdUcpNKZdC1jNAk3nbKRAYTcbdAMUwo",
+			"12D3KooWD4zDUAH8jmJosLRpmXnpdfL3CuRdLQYzDCohntWvAokZ",
+			"12D3KooWMUa6zjocDX7RqwncxpB7wAW7JTZq6j4i4FJA8TMYymLf",
+			"12D3KooWG6pafkZy2c8C9LRZFupsq3Xhevka1QKXakpW9gVJo3Hv",
+			"12D3KooWK3C9fuKcoHQR7mcH4hyibtBDaMmvhA6NnkVVB8dhSWb9",
+			"12D3KooWDAAFo8fneo3rEPqo5MXSMYbnUGJR3MBe7XDKrjy7YfzH",
+			"12D3KooWHYVVsNiQYNpnXU35QRtiSfRnpMNE8yA7381gt7ioSw4K",
+			"12D3KooWRQy9mzZtCUdGvYhffKubHh6StvAkbhfFc6QdEwFMS3CM",
+			"12D3KooWLaUPBso76akZBeecSE7UTdApAxRVLLcv9gFwfNHapJhA",
+			"12D3KooWG3iQLd5zRzpgu6mjSH8aEp7BLS7hey5DPwZ5VgweU1qF",
+			"12D3KooWKkUoCjN4pKBZJKvWPdBj5CP8eTr9UALVFVrEt5smu8WW",
+			"12D3KooWMrkfnMotLLkFSYVFfomNdFH1Gq9TjzEZTDocco4EBuTS",
+			"12D3KooWRnHv6ArRvS5uvFVjp6NioPZvgVvRRoiVqGmnbeKgBghm",
+			"12D3KooWMUAoE47cEZHeSgnuMF6X6robcECihiCRWps8aF1qJxYy",
+			"12D3KooWFu7Rzgj3H3MMucUHTyiJcoEq73QavL5pafhhvK5gQaXE",
+			"12D3KooWRv7H8pbEqzdFHrPtbvJxoRZfjMHMRoqrBzb4p38nZihZ",
+			"12D3KooWHLzKhYQdTZbJqvSM8cGUPQKtNyBbWPp6NPtyLw6LqqT3",
+			"12D3KooWKV6Gy8A6dnSGCASP3JXBeiZmbs4oTB9R4P2v8Mkatz8F",
+			"12D3KooWMrqg4RKUFc6sovBSRFBF4w2kXHpTG674u6qaNk4GfvZz",
+			"12D3KooWRPoHB671rVCCfzFDnDtfEKGjLgFLnb9RbwWvW7RGvDyd",
+			"12D3KooWLxVu2xriA4BnBprsS4JdMHgdKvghyEWHEYpuDhW2p6yB",
+			"12D3KooWBGHEvNGXpmovRo89n9tEohsaKbvD5MzHBZDiaYZBGWH5",
+		}
+
+		numSybilsFound := 0
+		for _, pid := range peers {
+			pidString := fmt.Sprintf("%s", pid)
+			for _, spid := range sybilcidlist {
+				if pidString == spid {
+					numSybilsFound += 1
+					break
 				}
 			}
+		}
+		fmt.Println("Number of Sybils found:", numSybilsFound)
 
-			// Give closer peers back to the query to be queried
-			logger.Debugf("got closer peers: %d %s", len(closest), closest)
-
-			routing.PublishQueryEvent(ctx, &routing.QueryEvent{
-				Type:      routing.PeerResponse,
-				ID:        p,
-				Responses: closest,
-			})
-
-			return closest, nil
-		},
-		func() bool {
-			return !findAll && psSize() >= count
-		},
-	)
-
-	// Check here also for eclipse attacks, maybe. But why is this function using multihash instead of key? :(
-
-	if err == nil && ctx.Err() == nil {
-		dht.refreshRTIfNoShortcut(kb.ConvertKey(string(key)), lookupRes)
+		_, e := dht.EclipseDetection(ctx, key, peers)
+		if e != nil {
+			fmt.Println(e)
+		}
 	}
 }
 
 // FindPeer searches for a peer with given ID.
 func (dht *IpfsDHT) FindPeer(ctx context.Context, id peer.ID) (_ peer.AddrInfo, err error) {
-	fmt.Println("Entered FindPeer function in custom go-libp2p: peerid ", id)
+	fmt.Println("FindPeer: peerid ", id)
 
 	if err := id.Validate(); err != nil {
 		return peer.AddrInfo{}, err

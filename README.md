@@ -1,43 +1,16 @@
 # go-libp2p-kad-dht
 
-[![](https://img.shields.io/badge/made%20by-Protocol%20Labs-blue.svg?style=flat-square)](https://protocol.ai)
-[![](https://img.shields.io/badge/project-libp2p-yellow.svg?style=flat-square)](https://libp2p.io)
-[![](https://img.shields.io/badge/freenode-%23libp2p-yellow.svg?style=flat-square)](http://webchat.freenode.net/?channels=%23yellow)
-[![GoDoc](https://godoc.org/github.com/libp2p/go-libp2p-kad-dht?status.svg)](https://godoc.org/github.com/libp2p/go-libp2p-kad-dht)
-[![Build Status](https://travis-ci.org/libp2p/go-libp2p-kad-dht.svg?branch=master)](https://travis-ci.org/libp2p/go-libp2p-kad-dht)
-[![Discourse posts](https://img.shields.io/discourse/https/discuss.libp2p.io/posts.svg)](https://discuss.libp2p.io)
+NOTE: The branch `eclipse-det` has been merged into `master` and deleted for convenience. Just use the `master` branch now.
 
-> A Kademlia DHT implementation on go-libp2p
+This repo adds eclipse attack detection functionality to `go-libp2p-kad-dht`.
 
-## Table of Contents
+Clone this repository. Also clone github.com/ipfs/kubo.
 
-- [Install](#install)
-- [Usage](#usage)
-- [Contribute](#contribute)
-- [License](#license)
+Do `cd kubo`. Launch the ipfs daemon by running `go run ./cmd/ipfs daemon`.
 
-## Install
+To find providers and also detect eclipse attack for a cid `cid`, run `go run ./cmd/ipfs dht findprovs cid` in another terminal. Check the terminal window where you ran ipfs daemon for log messages.
 
-```sh
-go get github.com/libp2p/go-libp2p-kad-dht
-```
-
-## Usage
-
-Go to https://godoc.org/github.com/libp2p/go-libp2p-kad-dht.
-
-## Contribute
-
-Contributions welcome. Please check out [the issues](https://github.com/libp2p/go-libp2p-kad-dht/issues).
-
-Check out our [contributing document](https://github.com/libp2p/community/blob/master/CONTRIBUTE.md) for more information on how we work, and about contributing in general. Please be aware that all interactions related to libp2p are subject to the IPFS [Code of Conduct](https://github.com/ipfs/community/blob/master/code-of-conduct.md).
-
-Small note: If editing the README, please conform to the [standard-readme](https://github.com/RichardLitt/standard-readme) specification.
-
-## License
-
-[MIT](LICENSE) © Protocol Labs Inc.
-
----
-
-The last gx published version of this module was: 4.4.34: QmXuNFLZc6Nb5akB4sZsxK3doShsFKT1sZFvxLXJvZQwAW
+To run eclipse attack during Provide, do the following:
+1. Uncomment lines 514-517 in routing.go (currently commented to avoid large amount of requests due to repeated provide operations)
+2. Create a new file `echo "hello" > ../hello.txt`
+3. In a new terminal window, run `go run ./cmd/ipfs add ../hello.txt`. While running the provide operation, this libp2p package will also run eclipse detection.

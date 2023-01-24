@@ -19,6 +19,7 @@ import (
 	dhtcfg "github.com/libp2p/go-libp2p-kad-dht/internal/config"
 	"github.com/libp2p/go-libp2p-kad-dht/internal/net"
 	"github.com/libp2p/go-libp2p-kad-dht/metrics"
+	"github.com/libp2p/go-libp2p-kad-dht/netsize"
 	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 	"github.com/libp2p/go-libp2p-kad-dht/providers"
 	"github.com/libp2p/go-libp2p-kad-dht/rtrefresh"
@@ -36,6 +37,8 @@ import (
 	ma "github.com/multiformats/go-multiaddr"
 	"go.opencensus.io/tag"
 	"go.uber.org/zap"
+
+	detection "github.com/ssrivatsan97/go-libp2p-kad-dht/eclipse-detection"
 )
 
 var (
@@ -72,6 +75,8 @@ type addPeerRTReq struct {
 	p         peer.ID
 	queryPeer bool
 }
+
+const defaultEclipseDetectionK = 20
 
 // IpfsDHT is an implementation of Kademlia with S/Kademlia modifications.
 // It is used to implement the base Routing module.
@@ -146,8 +151,16 @@ type IpfsDHT struct {
 
 	rtFreezeTimeout time.Duration
 
+	// network size estimator
+	nsEstimator *netsize.Estimator
+
 	// configuration variables for tests
 	testAddressUpdateProcessing bool
+
+	// Used for eclipse attack detection
+	detector             *detection.EclipseDetector
+	providerLk           sync.Mutex // TODO(Srivatsan): This is just to prevent concurrent provides from annoying me for now. Will be removed later
+	specialProvideNumber int
 }
 
 // Assert that IPFS assumptions about interfaces aren't broken. These aren't a
@@ -351,6 +364,13 @@ func makeDHT(ctx context.Context, h host.Host, cfg dhtcfg.Config) (*IpfsDHT, err
 
 	dht.rtFreezeTimeout = rtFreezeTimeout
 
+	// init network size estimator
+	dht.nsEstimator = netsize.NewEstimator(h.ID(), rt, cfg.BucketSize)
+
+	dht.addDetector() // TODO: Later, this may be made optional
+
+	dht.specialProvideNumber = 20
+
 	return dht, nil
 }
 
@@ -464,7 +484,6 @@ func (dht *IpfsDHT) fixLowPeersRoutine(proc goprocess.Process) {
 
 		dht.fixLowPeers(dht.Context())
 	}
-
 }
 
 // fixLowPeers tries to get more peers into the routing table if we're below the threshold
@@ -848,4 +867,34 @@ func (dht *IpfsDHT) maybeAddAddrs(p peer.ID, addrs []ma.Multiaddr, ttl time.Dura
 		return
 	}
 	dht.peerstore.AddAddrs(p, addrs, ttl)
+}
+
+func (dht *IpfsDHT) addDetector() {
+	dht.detector = detection.New(defaultEclipseDetectionK)
+}
+
+func (dht *IpfsDHT) GatherNetsizeData() {
+	fmt.Println("Doing a few queries to initialize the netsize estimator. This may take some time...")
+	const numSamples = 10
+	ctx := dht.Context()
+	for cpl := 0; cpl < numSamples; cpl++ {
+		randId, err := dht.routingTable.GenRandPeerID(uint(cpl))
+		if err != nil {
+			// fmt.Printf("Error in generating random peer id for CPL = %v\n", cpl)
+			fmt.Println(err)
+		}
+		closestPeers, err := dht.GetClosestPeers(ctx, string(randId))
+		_ = closestPeers
+		if err != nil {
+			// fmt.Printf("Error in getting closest peers for random id %s\n", randId)
+			fmt.Println(err)
+		}
+	}
+	// fmt.Println("Completed initialization of netsize estimator.")
+	// netsize, err := dht.nsEstimator.NetworkSize()
+	// if err == nil {
+	// 	fmt.Println("Estimated network size:", netsize)
+	// } else {
+	// 	fmt.Println("But, error:", err)
+	// }
 }
