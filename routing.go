@@ -438,6 +438,80 @@ func (dht *IpfsDHT) EclipseDetection(ctx context.Context, keyMH multihash.Multih
 	return result, nil
 }
 
+type EclipseDetectionResult = struct {
+	Counts    []int
+	Netsize   float64
+	L         int
+	Threshold float64
+	KL        float64
+	Detection bool
+}
+
+func (dht *IpfsDHT) EclipseDetectionVerbose(ctx context.Context, keyMH multihash.Multihash, peers []peer.ID) (EclipseDetectionResult, error) {
+	if len(peers) < defaultEclipseDetectionK {
+		return EclipseDetectionResult{}, fmt.Errorf("Not enough peers for eclipse detection. Expected: %d, found: %d\n", defaultEclipseDetectionK, len(peers))
+	}
+	if len(peers) > defaultEclipseDetectionK {
+		peers = peers[:defaultEclipseDetectionK]
+	}
+
+	// Eclipse attack detection here
+	// fmt.Println("Testing cid hash", keyMH, "for eclipse attack...")
+	if dht.Detector == nil {
+		return EclipseDetectionResult{}, fmt.Errorf("Detector not initialized!")
+	}
+
+	netsize, netsizeErr := dht.NsEstimator.NetworkSize()
+	if netsizeErr != nil {
+		dht.GatherNetsizeData()
+		netsize, netsizeErr = dht.NsEstimator.NetworkSize()
+		if netsizeErr != nil {
+			return EclipseDetectionResult{}, netsizeErr
+		}
+	}
+	fmt.Println("Estimated network size as", netsize)
+
+	l_est := dht.Detector.UpdateLFromNetsize(int(netsize))
+	fmt.Println("Estimated parameter l as", l_est)
+	// dht.Detector.UpdateThreshold(1.0)
+	threshold := dht.Detector.UpdateThresholdFromNetsize(int(netsize))
+	fmt.Println("Estimated threshold as", threshold)
+
+	targetBytes := []byte(kb.ConvertKey(string(keyMH)))
+	// fmt.Println("Eclipse attack detection for id hash:", keyMH)
+	// fmt.Printf("CID in the DHT keyspace: %x \n", targetBytes)
+	peeridsBytes := make([][]byte, len(peers))
+	//fmt.Println("Number of peers obtained: ", len(peers))
+	for i := range peeridsBytes {
+		peeridsBytes[i] = []byte(kb.ConvertKey(string(peers[i])))
+		// fmt.Printf("%s %x \n", peers[i], peeridsBytes[i])
+		// fmt.Printf("%s \n", peers[i])
+	}
+
+	counts := dht.Detector.ComputePrefixLenCounts(targetBytes, peeridsBytes)
+	kl := dht.Detector.ComputeKLFromCounts(counts)
+	fmt.Println("Counts:", counts)
+	fmt.Println("KL divergence:", kl)
+	result := dht.Detector.DetectFromKL(kl)
+	fmt.Println("Eclipse detection result:", result)
+	var resultStr string
+	if result {
+		resultStr = "possible attack"
+	} else {
+		resultStr = "no attack"
+	}
+	fmt.Println("Eclipse attack detector says: ", resultStr, ", threshold =", threshold)
+	// Eclipse attack detection code ends here
+	return EclipseDetectionResult{
+		Counts:    counts,
+		Netsize:   netsize,
+		L:         l_est,
+		Threshold: threshold,
+		KL:        kl,
+		Detection: result,
+	}, nil
+}
+
 // Provider abstraction for indirect stores.
 // Some DHTs store values directly, while an indirect store stores pointers to
 // locations of the value, similarly to Coral and Mainline DHT.
