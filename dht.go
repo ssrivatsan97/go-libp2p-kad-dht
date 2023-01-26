@@ -885,10 +885,12 @@ func (dht *IpfsDHT) GatherNetsizeData() {
 			fmt.Println(err)
 		}
 		closestPeers, err := dht.GetClosestPeers(ctx, string(randId))
-		_ = closestPeers
 		if err != nil {
 			// fmt.Printf("Error in getting closest peers for random id %s\n", randId)
 			fmt.Println(err)
+		}
+		if err = dht.NsEstimator.Track(string(randId), closestPeers); err != nil {
+			logger.Warnf("network size estimator track peers: %s", err)
 		}
 	}
 	// fmt.Println("Completed initialization of netsize estimator.")
