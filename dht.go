@@ -152,14 +152,15 @@ type IpfsDHT struct {
 	rtFreezeTimeout time.Duration
 
 	// network size estimator
-	nsEstimator *netsize.Estimator
+	NsEstimator *netsize.Estimator
 
 	// configuration variables for tests
 	testAddressUpdateProcessing bool
 
 	// Used for eclipse attack detection
-	detector             *detection.EclipseDetector
+	Detector             *detection.EclipseDetector
 	providerLk           sync.Mutex // TODO(Srivatsan): This is just to prevent concurrent provides from annoying me for now. Will be removed later
+	enableSpecialProvide bool       // This flag controls whether the special provide option is invoked.
 	specialProvideNumber int
 }
 
@@ -365,7 +366,7 @@ func makeDHT(ctx context.Context, h host.Host, cfg dhtcfg.Config) (*IpfsDHT, err
 	dht.rtFreezeTimeout = rtFreezeTimeout
 
 	// init network size estimator
-	dht.nsEstimator = netsize.NewEstimator(h.ID(), rt, cfg.BucketSize)
+	dht.NsEstimator = netsize.NewEstimator(h.ID(), rt, cfg.BucketSize)
 
 	dht.addDetector() // TODO: Later, this may be made optional
 
@@ -870,7 +871,7 @@ func (dht *IpfsDHT) maybeAddAddrs(p peer.ID, addrs []ma.Multiaddr, ttl time.Dura
 }
 
 func (dht *IpfsDHT) addDetector() {
-	dht.detector = detection.New(defaultEclipseDetectionK)
+	dht.Detector = detection.New(defaultEclipseDetectionK)
 }
 
 func (dht *IpfsDHT) GatherNetsizeData() {
@@ -891,7 +892,7 @@ func (dht *IpfsDHT) GatherNetsizeData() {
 		}
 	}
 	// fmt.Println("Completed initialization of netsize estimator.")
-	// netsize, err := dht.nsEstimator.NetworkSize()
+	// netsize, err := dht.NsEstimator.NetworkSize()
 	// if err == nil {
 	// 	fmt.Println("Estimated network size:", netsize)
 	// } else {

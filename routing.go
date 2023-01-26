@@ -24,7 +24,10 @@ import (
 )
 
 // This flag controls whether the special provide option is invoked.
-const enableSpecialProvide = true
+
+func (dht *IpfsDHT) EnableSpecialProvide() {
+	dht.enableSpecialProvide = true
+}
 
 // This parameter controls how many DHT peers are sent the provider record, in case of a detected eclipse attack,
 // The provider record is sent to all peers within the distance in which there are expected to be specialProvideNumber peers
@@ -387,24 +390,24 @@ func (dht *IpfsDHT) EclipseDetection(ctx context.Context, keyMH multihash.Multih
 
 	// Eclipse attack detection here
 	// fmt.Println("Testing cid hash", keyMH, "for eclipse attack...")
-	if dht.detector == nil {
+	if dht.Detector == nil {
 		return false, fmt.Errorf("Detector not initialized!")
 	}
 
-	netsize, netsizeErr := dht.nsEstimator.NetworkSize()
+	netsize, netsizeErr := dht.NsEstimator.NetworkSize()
 	if netsizeErr != nil {
 		dht.GatherNetsizeData()
-		netsize, netsizeErr = dht.nsEstimator.NetworkSize()
+		netsize, netsizeErr = dht.NsEstimator.NetworkSize()
 		if netsizeErr != nil {
 			return false, netsizeErr
 		}
 	}
 	fmt.Println("Estimated network size as", netsize)
 
-	l_est := dht.detector.UpdateLFromNetsize(int(netsize))
+	l_est := dht.Detector.UpdateLFromNetsize(int(netsize))
 	fmt.Println("Estimated parameter l as", l_est)
-	// dht.detector.UpdateThreshold(1.0)
-	threshold := dht.detector.UpdateThresholdFromNetsize(int(netsize))
+	// dht.Detector.UpdateThreshold(1.0)
+	threshold := dht.Detector.UpdateThresholdFromNetsize(int(netsize))
 	fmt.Println("Estimated threshold as", threshold)
 
 	targetBytes := []byte(kb.ConvertKey(string(keyMH)))
@@ -418,11 +421,11 @@ func (dht *IpfsDHT) EclipseDetection(ctx context.Context, keyMH multihash.Multih
 		// fmt.Printf("%s \n", peers[i])
 	}
 
-	counts := dht.detector.ComputePrefixLenCounts(targetBytes, peeridsBytes)
-	kl := dht.detector.ComputeKLFromCounts(counts)
+	counts := dht.Detector.ComputePrefixLenCounts(targetBytes, peeridsBytes)
+	kl := dht.Detector.ComputeKLFromCounts(counts)
 	fmt.Println("Counts:", counts)
 	fmt.Println("KL divergence:", kl)
-	result := dht.detector.DetectFromKL(kl)
+	result := dht.Detector.DetectFromKL(kl)
 	fmt.Println("Eclipse detection result:", result)
 	var resultStr string
 	if result {
@@ -568,14 +571,14 @@ func (dht *IpfsDHT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (err 
 	var netsizeErr error
 	var netsize float64
 
-	if enableSpecialProvide {
-		netsize, netsizeErr = dht.nsEstimator.NetworkSize()
+	if dht.enableSpecialProvide {
+		netsize, netsizeErr = dht.NsEstimator.NetworkSize()
 		if netsizeErr != nil {
 			dht.GatherNetsizeData()
-			netsize, netsizeErr = dht.nsEstimator.NetworkSize()
+			netsize, netsizeErr = dht.NsEstimator.NetworkSize()
 		}
 	}
-	if enableSpecialProvide && netsizeErr == nil {
+	if dht.enableSpecialProvide && netsizeErr == nil {
 		// Calculate the expected maximum distance of the `specialProvideNumber` number of closest peers.
 		// Then calculate the minimum common prefix length of all peerids within that distance
 		minCPL := int(math.Ceil(math.Log2(netsize/float64(dht.specialProvideNumber)))) - 1
@@ -684,15 +687,15 @@ func (dht *IpfsDHT) ProvideWithReturn(ctx context.Context, key cid.Cid, brdcst b
 	var netsizeErr error
 	var netsize float64
 
-	if enableSpecialProvide {
-		netsize, netsizeErr = dht.nsEstimator.NetworkSize()
+	if dht.enableSpecialProvide {
+		netsize, netsizeErr = dht.NsEstimator.NetworkSize()
 		if netsizeErr != nil {
 			dht.GatherNetsizeData()
-			netsize, netsizeErr = dht.nsEstimator.NetworkSize()
+			netsize, netsizeErr = dht.NsEstimator.NetworkSize()
 		}
 	}
 	var numLookups int
-	if enableSpecialProvide && netsizeErr == nil {
+	if dht.enableSpecialProvide && netsizeErr == nil {
 		// Calculate the expected maximum distance of the `specialProvideNumber` number of closest peers.
 		// Then calculate the minimum common prefix length of all peerids within that distance
 		minCPL := int(math.Ceil(math.Log2(netsize/float64(dht.specialProvideNumber)))) - 1
@@ -927,14 +930,14 @@ func (dht *IpfsDHT) findProvidersAsyncRoutineReturnOnPathNodes(ctx context.Conte
 	var peers []peer.ID
 	var netsize float64
 	var netsizeErr error
-	if enableSpecialProvide {
-		netsize, netsizeErr = dht.nsEstimator.NetworkSize()
+	if dht.enableSpecialProvide {
+		netsize, netsizeErr = dht.NsEstimator.NetworkSize()
 		if netsizeErr != nil {
 			dht.GatherNetsizeData()
-			netsize, netsizeErr = dht.nsEstimator.NetworkSize()
+			netsize, netsizeErr = dht.NsEstimator.NetworkSize()
 		}
 	}
-	if enableSpecialProvide && netsizeErr == nil {
+	if dht.enableSpecialProvide && netsizeErr == nil {
 		minCPL := int(math.Ceil(math.Log2(netsize/float64(dht.specialProvideNumber)))) - 1
 		fmt.Println("Finding providers from all peers with CPL", minCPL)
 		var numLookups int
@@ -1117,14 +1120,14 @@ func (dht *IpfsDHT) findProvidersAsyncRoutine(ctx context.Context, key multihash
 	var peers []peer.ID
 	var netsize float64
 	var netsizeErr error
-	if enableSpecialProvide {
-		netsize, netsizeErr = dht.nsEstimator.NetworkSize()
+	if dht.enableSpecialProvide {
+		netsize, netsizeErr = dht.NsEstimator.NetworkSize()
 		if netsizeErr != nil {
 			dht.GatherNetsizeData()
-			netsize, netsizeErr = dht.nsEstimator.NetworkSize()
+			netsize, netsizeErr = dht.NsEstimator.NetworkSize()
 		}
 	}
-	if enableSpecialProvide && netsizeErr == nil {
+	if dht.enableSpecialProvide && netsizeErr == nil {
 		minCPL := int(math.Ceil(math.Log2(netsize/float64(dht.specialProvideNumber)))) - 1
 		fmt.Println("Finding providers from all peers with CPL", minCPL)
 		var numLookups int
