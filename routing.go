@@ -29,6 +29,10 @@ func (dht *IpfsDHT) EnableSpecialProvide() {
 	dht.enableSpecialProvide = true
 }
 
+func (dht *IpfsDHT) DisableSpecialProvide() {
+	dht.enableSpecialProvide = false
+}
+
 // This parameter controls how many DHT peers are sent the provider record, in case of a detected eclipse attack,
 // The provider record is sent to all peers within the distance in which there are expected to be specialProvideNumber peers
 // const specialProvideNumber = 30
