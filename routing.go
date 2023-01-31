@@ -382,7 +382,7 @@ func (dht *IpfsDHT) refreshRTIfNoShortcut(key kb.ID, lookupRes *lookupWithFollow
 
 func (dht *IpfsDHT) EclipseDetection(ctx context.Context, keyMH multihash.Multihash, peers []peer.ID) (bool, error) {
 	if len(peers) < defaultEclipseDetectionK {
-		return false, fmt.Errorf("Not enough peers for eclipse detection. Expected: %d, found: %d\n", defaultEclipseDetectionK, len(peers))
+		return false, fmt.Errorf("not enough peers for eclipse detection: expected: %d, found: %d", defaultEclipseDetectionK, len(peers))
 	}
 	if len(peers) > defaultEclipseDetectionK {
 		peers = peers[:defaultEclipseDetectionK]
@@ -391,7 +391,7 @@ func (dht *IpfsDHT) EclipseDetection(ctx context.Context, keyMH multihash.Multih
 	// Eclipse attack detection here
 	// fmt.Println("Testing cid hash", keyMH, "for eclipse attack...")
 	if dht.Detector == nil {
-		return false, fmt.Errorf("Detector not initialized!")
+		return false, fmt.Errorf("detector not initialized")
 	}
 
 	netsize, netsizeErr := dht.NsEstimator.NetworkSize()
@@ -449,7 +449,7 @@ type EclipseDetectionResult = struct {
 
 func (dht *IpfsDHT) EclipseDetectionVerbose(ctx context.Context, keyMH multihash.Multihash, peers []peer.ID) (EclipseDetectionResult, error) {
 	if len(peers) < defaultEclipseDetectionK {
-		return EclipseDetectionResult{}, fmt.Errorf("Not enough peers for eclipse detection. Expected: %d, found: %d\n", defaultEclipseDetectionK, len(peers))
+		return EclipseDetectionResult{}, fmt.Errorf("not enough peers for eclipse detection: expected: %d, found: %d", defaultEclipseDetectionK, len(peers))
 	}
 	if len(peers) > defaultEclipseDetectionK {
 		peers = peers[:defaultEclipseDetectionK]
@@ -458,7 +458,7 @@ func (dht *IpfsDHT) EclipseDetectionVerbose(ctx context.Context, keyMH multihash
 	// Eclipse attack detection here
 	// fmt.Println("Testing cid hash", keyMH, "for eclipse attack...")
 	if dht.Detector == nil {
-		return EclipseDetectionResult{}, fmt.Errorf("Detector not initialized!")
+		return EclipseDetectionResult{}, fmt.Errorf("detector not initialized")
 	}
 
 	netsize, netsizeErr := dht.NsEstimator.NetworkSize()
