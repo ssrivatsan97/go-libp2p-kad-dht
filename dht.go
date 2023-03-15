@@ -38,6 +38,8 @@ import (
 	"go.opencensus.io/tag"
 	"go.uber.org/zap"
 
+	gocid "github.com/ipfs/go-cid"
+
 	detection "github.com/ssrivatsan97/go-libp2p-kad-dht/eclipse-detection"
 )
 
@@ -884,11 +886,21 @@ func (dht *IpfsDHT) GatherNetsizeData() {
 			// fmt.Printf("Error in generating random peer id for CPL = %v\n", cpl)
 			fmt.Println(err)
 		}
-		closestPeers, err := dht.GetClosestPeers(ctx, string(randId))
+		cidFormat, err := gocid.Decode(randId.String())
+		if err != nil {
+			// fmt.Printf("Error in decoding random peer id %s\n", randId)
+			fmt.Println(err)
+		}
+		multih := cidFormat.Hash()
+		closestPeers, err := dht.GetClosestPeers(ctx, string(multih))
 		if err != nil {
 			// fmt.Printf("Error in getting closest peers for random id %s\n", randId)
 			fmt.Println(err)
 		}
+		fmt.Printf("GatherNetsizeData: cpl = %d\n", cpl)
+		fmt.Println("Random id (peer.ID): " + randId.String())
+		fmt.Printf("Multihash: %s\n", multih)
+		fmt.Printf("Found %d closest peers.\n", len(closestPeers))
 		if err = dht.NsEstimator.Track(string(randId), closestPeers); err != nil {
 			logger.Warnf("network size estimator track peers: %s", err)
 		}
