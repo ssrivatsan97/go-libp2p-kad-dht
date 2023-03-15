@@ -25,11 +25,11 @@ import (
 
 // This flag controls whether the special provide option is invoked.
 
-func (dht *IpfsDHT) EnableSpecialProvide() {
+func (dht *IpfsDHT) EnableMitigation() {
 	dht.enableSpecialProvide = true
 }
 
-func (dht *IpfsDHT) DisableSpecialProvide() {
+func (dht *IpfsDHT) DisableMitigation() {
 	dht.enableSpecialProvide = false
 }
 
