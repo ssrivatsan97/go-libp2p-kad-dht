@@ -531,7 +531,7 @@ func (dht *IpfsDHT) ProvideWithoutEclipseDetection(ctx context.Context, key cid.
 	logger.Debugw("providing", "cid", key, "mh", internal.LoggableProviderRecordBytes(keyMH))
 
 	// add self locally
-	dht.providerStore.AddProvider(ctx, keyMH, peer.AddrInfo{ID: dht.self})
+	// dht.providerStore.AddProvider(ctx, keyMH, peer.AddrInfo{ID: dht.self})
 	if !brdcst {
 		return nil
 	}
@@ -734,7 +734,7 @@ func (dht *IpfsDHT) ProvideWithReturn(ctx context.Context, key cid.Cid, brdcst b
 	logger.Debugw("providing", "cid", key, "mh", internal.LoggableProviderRecordBytes(keyMH))
 
 	// add self locally
-	dht.providerStore.AddProvider(ctx, keyMH, peer.AddrInfo{ID: dht.self})
+	// dht.providerStore.AddProvider(ctx, keyMH, peer.AddrInfo{ID: dht.self})
 	if !brdcst {
 		return nil, make([]peer.ID, 0), 0
 	}
