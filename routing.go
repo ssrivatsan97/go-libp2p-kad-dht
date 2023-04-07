@@ -872,15 +872,15 @@ func (dht *IpfsDHT) FindProvidersSyncReturnOnPathNodes(ctx context.Context, key 
 		}
 		return false
 	}
-	// psSize := func() int {
-	// 	psLock.Lock()
-	// 	defer psLock.Unlock()
-	// 	return len(ps)
-	// }
+	psSize := func() int {
+		psLock.Lock()
+		defer psLock.Unlock()
+		return len(ps)
+	}
 
 	provs, err := dht.providerStore.GetProviders(ctx, keyMH)
 	if err != nil {
-		fmt.Println("Could not providers from local provider store", err)
+		fmt.Println("Could not find providers from local provider store", err)
 		return peerOut, peersContacted, err
 	}
 	fmt.Printf("Found %d providers from local provider store\n", len(provs))
@@ -899,7 +899,6 @@ func (dht *IpfsDHT) FindProvidersSyncReturnOnPathNodes(ctx context.Context, key 
 			return peerOut, peersContacted, nil
 		}
 	}
-	fmt.Println("Added local providers to peerOut. Looking for more providers.")
 
 	var peers []peer.ID
 	var netsizeErr error
@@ -940,56 +939,54 @@ func (dht *IpfsDHT) FindProvidersSyncReturnOnPathNodes(ctx context.Context, key 
 	}
 
 	queryCounter := 0
-	// var counterMutex sync.Mutex
-	// var peerOutMutex sync.Mutex
-	// var contactedMutex sync.Mutex
-	// wg := sync.WaitGroup{}
+	var counterMutex sync.Mutex
+	var peerOutMutex sync.Mutex
+	var contactedMutex sync.Mutex
+	wg := sync.WaitGroup{}
 	for _, p := range peers {
-		// wg.Add(1)
-		// go func(p peer.ID) {
-		// 	defer wg.Done()
-		// counterMutex.Lock()
-		queryCounter += 1
-		fmt.Printf("%d [FindProvidersSync...] Sending GetProviders to peer: %s for key: %s\n", queryCounter, p.String(), keyMH.B58String())
-		// counterMutex.Unlock()
-		// contactedMutex.Lock()
-		peersContacted = append(peersContacted, p)
-		// contactedMutex.Unlock()
+		wg.Add(1)
+		go func(p peer.ID) {
+			defer wg.Done()
+			counterMutex.Lock()
+			queryCounter += 1
+			fmt.Printf("%d [FindProvidersSync...] Sending GetProviders to peer: %s for key: %s\n", queryCounter, p.String(), keyMH.B58String())
+			counterMutex.Unlock()
+			contactedMutex.Lock()
+			peersContacted = append(peersContacted, p)
+			contactedMutex.Unlock()
 
-		provs, _, err := dht.protoMessenger.GetProviders(ctx, p, keyMH)
-		if err != nil {
-			fmt.Printf("[FindProvidersSync...] GetProviders to peer %s was unsuccessful\n", p.String())
-			// return
-			continue
-		}
-		fmt.Printf("Got %d providers from peer %s\n", len(provs), p.String())
-		// Add unique providers from request, up to 'count'
-		for _, prov := range provs {
-			dht.maybeAddAddrs(prov.ID, prov.Addrs, peerstore.TempAddrTTL)
-			logger.Debugf("got provider: %s", prov)
-			if psTryAdd(prov.ID) {
-				logger.Debugf("using provider: %s", prov)
-				// peerOutMutex.Lock()
-				peerOut = append(peerOut, *prov)
-				// peerOutMutex.Unlock()
-				if ctx.Err() != nil {
-					logger.Debug("context timed out sending more providers")
-					break
-					// return
+			provs, _, err := dht.protoMessenger.GetProviders(ctx, p, keyMH)
+			if err != nil {
+				fmt.Printf("[FindProvidersSync...] GetProviders to peer %s was unsuccessful\n", p.String())
+				return
+			}
+			fmt.Printf("Got %d providers from peer %s\n", len(provs), p.String())
+			// Add unique providers from request, up to 'count'
+			for _, prov := range provs {
+				dht.maybeAddAddrs(prov.ID, prov.Addrs, peerstore.TempAddrTTL)
+				logger.Debugf("got provider: %s", prov)
+				if psTryAdd(prov.ID) {
+					logger.Debugf("using provider: %s", prov)
+					peerOutMutex.Lock()
+					peerOut = append(peerOut, *prov)
+					peerOutMutex.Unlock()
+					if ctx.Err() != nil {
+						logger.Debug("context timed out sending more providers")
+						return
+					}
+				}
+				if !findAll && psSize() >= count {
+					logger.Debugf("got enough providers (%d/%d)", psSize(), count)
+					return
 				}
 			}
-			// if !findAll && psSize() >= count {
-			// 	logger.Debugf("got enough providers (%d/%d)", psSize(), count)
-			// 	// return
-			// }
-		}
-		// }(p)
+		}(p)
 		if ctx.Err() != nil {
 			logger.Debug("context timed out sending more providers")
 			break
 		}
 	}
-	// wg.Wait()
+	wg.Wait()
 
 	fmt.Printf("[FindProvidersSync...] Contacted %d resolvers\n", len(peersContacted))
 	fmt.Printf("[FindProvidersSync...] Found %d providers\n", len(peerOut))
