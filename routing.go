@@ -883,7 +883,7 @@ func (dht *IpfsDHT) FindProvidersSyncReturnOnPathNodes(ctx context.Context, key 
 		fmt.Println("Could not providers from local provider store", err)
 		return peerOut, peersContacted, err
 	}
-	fmt.Println("Finished reading providers from local provider store")
+	fmt.Printf("Found %d providers from local provider store\n", len(provs))
 	for _, p := range provs {
 		// NOTE: Assuming that this list of peers is unique
 		if psTryAdd(p.ID) {
@@ -901,16 +901,37 @@ func (dht *IpfsDHT) FindProvidersSyncReturnOnPathNodes(ctx context.Context, key 
 	}
 	fmt.Println("Added local providers to peerOut. Looking for more providers.")
 
-	fmt.Println("Getting closest peers to key:", key.String(), "(", keyMH, ")")
-	peers, err := dht.GetClosestPeers(ctx, string(keyMH))
+	var peers []peer.ID
+	var netsizeErr error
+	var netsize float64
+	if dht.enableSpecialProvide {
+		netsize, netsizeErr = dht.NsEstimator.NetworkSize()
+		if netsizeErr != nil {
+			dht.GatherNetsizeData()
+			netsize, netsizeErr = dht.NsEstimator.NetworkSize()
+		}
+	}
+	if dht.enableSpecialProvide && netsizeErr == nil {
+		// Calculate the expected maximum distance of the `specialProvideNumber` number of closest peers.
+		// Then calculate the minimum common prefix length of all peerids within that distance
+		minCPL := int(math.Ceil(math.Log2(netsize/float64(dht.specialProvideNumber)))) - 1
+		fmt.Println("Find providers for cid", key, ", hash:", keyMH, "from all peers with CPL", minCPL)
+		peers, _, err = dht.GetPeersWithCPLGet(ctx, string(keyMH), minCPL)
+	} else {
+		if netsizeErr != nil {
+			fmt.Println("Defaulting to regular FindProviders operation due to error in netsize estimation:", netsizeErr)
+		}
+		peers, err = dht.GetClosestPeers(ctx, string(keyMH))
+	}
+
 	if err != nil {
-		fmt.Println("Error in GetClosestPeers:", err)
+		fmt.Println("Error in GetClosestPeers/GetPeersWithCPLGet:", err)
 		return peerOut, peersContacted, err
 	}
 	if len(peers) == 0 {
-		fmt.Println("No peers found in GetClosestPeers")
+		fmt.Println("No peers found in GetClosestPeers/GetPeersWithCPLGet")
 		// return peerOut, peersContacted, and new custom error
-		return peerOut, peersContacted, fmt.Errorf("no peers found in GetClosestPeers")
+		return peerOut, peersContacted, fmt.Errorf("no peers found in GetClosestPeers/GetPeersWithCPLGet")
 	}
 
 	fmt.Println("Number of peers that will be contacted:", len(peers))
