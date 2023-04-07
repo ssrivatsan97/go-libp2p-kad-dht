@@ -25,11 +25,11 @@ import (
 
 // This flag controls whether the special provide option is invoked.
 
-func (dht *IpfsDHT) EnableSpecialProvide() {
+func (dht *IpfsDHT) EnableMitigation() {
 	dht.enableSpecialProvide = true
 }
 
-func (dht *IpfsDHT) DisableSpecialProvide() {
+func (dht *IpfsDHT) DisableMitigation() {
 	dht.enableSpecialProvide = false
 }
 
@@ -531,7 +531,7 @@ func (dht *IpfsDHT) ProvideWithoutEclipseDetection(ctx context.Context, key cid.
 	logger.Debugw("providing", "cid", key, "mh", internal.LoggableProviderRecordBytes(keyMH))
 
 	// add self locally
-	dht.providerStore.AddProvider(ctx, keyMH, peer.AddrInfo{ID: dht.self})
+	// dht.providerStore.AddProvider(ctx, keyMH, peer.AddrInfo{ID: dht.self})
 	if !brdcst {
 		return nil
 	}
@@ -718,7 +718,7 @@ func (dht *IpfsDHT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (err 
 	return ctx.Err()
 }
 
-func (dht *IpfsDHT) ProvideWithReturn(ctx context.Context, key cid.Cid, brdcst bool) (error, []peer.ID, int) {
+func (dht *IpfsDHT) ProvideWithReturn(ctx context.Context, key cid.Cid, brdcst bool) (error, []peer.ID, [] peer.ID, int) {
 	var err error
 	dht.providerLk.Lock()         // TODO(Srivatsan): This is just to prevent concurrent provides from annoying me for now. Will be removed later
 	defer dht.providerLk.Unlock() // TODO(Srivatsan): This is just to prevent concurrent provides from annoying me for now. Will be removed later
@@ -727,16 +727,16 @@ func (dht *IpfsDHT) ProvideWithReturn(ctx context.Context, key cid.Cid, brdcst b
 	fmt.Println("Provide: cid", key, ", hash:", keyMH)
 
 	if !dht.enableProviders {
-		return routing.ErrNotSupported, make([]peer.ID, 0), 0
+        return routing.ErrNotSupported, make([]peer.ID, 0), make([]peer.ID, 0), 0
 	} else if !key.Defined() {
-		return fmt.Errorf("invalid cid: undefined"), make([]peer.ID, 0), 0
+        return fmt.Errorf("invalid cid: undefined"), make([]peer.ID, 0), make([]peer.ID, 0), 0
 	}
 	logger.Debugw("providing", "cid", key, "mh", internal.LoggableProviderRecordBytes(keyMH))
 
 	// add self locally
-	dht.providerStore.AddProvider(ctx, keyMH, peer.AddrInfo{ID: dht.self})
+	// dht.providerStore.AddProvider(ctx, keyMH, peer.AddrInfo{ID: dht.self})
 	if !brdcst {
-		return nil, make([]peer.ID, 0), 0
+        return nil, make([]peer.ID, 0), make([]peer.ID, 0), 0
 	}
 
 	closerCtx := ctx
@@ -746,7 +746,7 @@ func (dht *IpfsDHT) ProvideWithReturn(ctx context.Context, key cid.Cid, brdcst b
 
 		if timeout < 0 {
 			// timed out
-			return context.DeadlineExceeded, make([]peer.ID, 0), 0
+            return context.DeadlineExceeded, make([]peer.ID, 0), make([]peer.ID, 0), 0
 		} else if timeout < 10*time.Second {
 			// Reserve 10% for the final put.
 			deadline = deadline.Add(-timeout / 10)
@@ -762,6 +762,7 @@ func (dht *IpfsDHT) ProvideWithReturn(ctx context.Context, key cid.Cid, brdcst b
 
 	var exceededDeadline bool
 	var peers []peer.ID
+    var peersPutProvidersSuccess []peer.ID //peers for which putProviders was successful
 	var netsizeErr error
 	var netsize float64
 
@@ -793,12 +794,12 @@ func (dht *IpfsDHT) ProvideWithReturn(ctx context.Context, key cid.Cid, brdcst b
 		// context is still fine, provide the value to the closest peers
 		// we managed to find, even if they're not the _actual_ closest peers.
 		if ctx.Err() != nil {
-			return ctx.Err(), make([]peer.ID, 0), 0
+            return ctx.Err(), make([]peer.ID, 0), make([]peer.ID, 0), 0
 		}
 		exceededDeadline = true
 	case nil:
 	default:
-		return err, make([]peer.ID, 0), 0
+        return err, make([]peer.ID, 0), make([]peer.ID, 0), 0
 	}
 
 	fmt.Printf("Provide CID hash: %x\n", []byte(kb.ConvertKey(string(keyMH))))
@@ -818,20 +819,22 @@ func (dht *IpfsDHT) ProvideWithReturn(ctx context.Context, key cid.Cid, brdcst b
 			err := dht.protoMessenger.PutProvider(ctx, p, keyMH, dht.host)
 			if err != nil {
 				logger.Debug(err)
-			}
+			}else {
+                peersPutProvidersSuccess = append(peersPutProvidersSuccess, p)
+            }
 		}(p)
 	}
 	wg.Wait()
 	if exceededDeadline {
-		return context.DeadlineExceeded, make([]peer.ID, 0), 0
+        return context.DeadlineExceeded, make([]peer.ID, 0), make([]peer.ID, 0), 0
 	}
 
-	_, e := dht.EclipseDetection(ctx, keyMH, peers)
-	if e != nil {
-		return e, make([]peer.ID, 0), 0
-	}
+	//_, e := dht.EclipseDetection(ctx, keyMH, peers)
+	//if e != nil {
+    //    return err, make([]peer.ID, 0), make([]peer.ID, 0), 0
+	//}
 
-	return ctx.Err(), peers, numLookups
+    return ctx.Err(), peers, peersPutProvidersSuccess, numLookups
 }
 
 func (dht *IpfsDHT) FindProvidersSyncReturnOnPathNodes(ctx context.Context, key cid.Cid) ([]peer.AddrInfo, []peer.ID, error) {
@@ -1088,13 +1091,16 @@ func (dht *IpfsDHT) findProvidersAsyncRoutineReturnOnPathNodes(ctx context.Conte
 				queryCounter += 1
 				fmt.Printf("%d [runLookupWithFollowup] GetProviders sent to peer: %s for key: %s\n", queryCounter, peer.Encode(p), key.B58String())
 				mutex.Unlock()
-				select {
-				case peersContacted <- p:
-				}
+				//select {
+				//case peersContacted <- p:
+				//}
 
 				provs, closest, err := dht.protoMessenger.GetProviders(ctx, p, key)
 				if err != nil {
 					return nil, err
+				}
+				select {
+				case peersContacted <- p:
 				}
 
 				logger.Debugf("%d provider entries", len(provs))
