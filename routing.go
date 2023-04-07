@@ -834,6 +834,144 @@ func (dht *IpfsDHT) ProvideWithReturn(ctx context.Context, key cid.Cid, brdcst b
 	return ctx.Err(), peers, numLookups
 }
 
+func (dht *IpfsDHT) FindProvidersSyncReturnOnPathNodes(ctx context.Context, key cid.Cid) ([]peer.AddrInfo, []peer.ID, error) {
+	if !dht.enableProviders {
+		return nil, nil, routing.ErrNotSupported
+	} else if !key.Defined() {
+		return nil, nil, fmt.Errorf("invalid cid: undefined")
+	}
+	count := dht.bucketSize
+
+	keyMH := key.Hash()
+
+	fmt.Printf("[FindProvidersSyncReturnOnPathNodes] Finding providers for key: %s\n", key.String())
+
+	// chSize := count
+	// if count == 0 {
+	// 	chSize = 1
+	// }
+	// peerOut := make([]peer.AddrInfo, chSize)
+	// peersContacted := make([]peer.ID, 2000) // XXX increase this if necessary
+	var peerOut []peer.AddrInfo
+	var peersContacted []peer.ID
+
+	findAll := count == 0
+
+	ps := make(map[peer.ID]struct{})
+	psLock := &sync.Mutex{}
+	psTryAdd := func(p peer.ID) bool {
+		psLock.Lock()
+		defer psLock.Unlock()
+		_, ok := ps[p]
+		if !ok && (len(ps) < count || findAll) {
+			ps[p] = struct{}{}
+			return true
+		}
+		return false
+	}
+	// psSize := func() int {
+	// 	psLock.Lock()
+	// 	defer psLock.Unlock()
+	// 	return len(ps)
+	// }
+
+	provs, err := dht.providerStore.GetProviders(ctx, keyMH)
+	if err != nil {
+		fmt.Println("Could not providers from local provider store", err)
+		return peerOut, peersContacted, err
+	}
+	fmt.Println("Finished reading providers from local provider store")
+	for _, p := range provs {
+		// NOTE: Assuming that this list of peers is unique
+		if psTryAdd(p.ID) {
+			peerOut = append(peerOut, p)
+			if ctx.Err() != nil {
+				return peerOut, peersContacted, ctx.Err()
+			}
+		}
+
+		// If we have enough peers locally, don't bother with remote RPC
+		// TODO: is this a DOS vector?
+		if !findAll && len(ps) >= count {
+			return peerOut, peersContacted, nil
+		}
+	}
+	fmt.Println("Added local providers to peerOut. Looking for more providers.")
+
+	fmt.Println("Getting closest peers to key:", key.String(), "(", keyMH, ")")
+	peers, err := dht.GetClosestPeers(ctx, string(keyMH))
+	if err != nil {
+		fmt.Println("Error in GetClosestPeers:", err)
+		return peerOut, peersContacted, err
+	}
+	if len(peers) == 0 {
+		fmt.Println("No peers found in GetClosestPeers")
+		// return peerOut, peersContacted, and new custom error
+		return peerOut, peersContacted, fmt.Errorf("no peers found in GetClosestPeers")
+	}
+
+	fmt.Println("Number of peers that will be contacted:", len(peers))
+	for _, p := range peers {
+		fmt.Printf("Peer: %s\n", p.String())
+	}
+
+	queryCounter := 0
+	// var counterMutex sync.Mutex
+	// var peerOutMutex sync.Mutex
+	// var contactedMutex sync.Mutex
+	// wg := sync.WaitGroup{}
+	for _, p := range peers {
+		// wg.Add(1)
+		// go func(p peer.ID) {
+		// 	defer wg.Done()
+		// counterMutex.Lock()
+		queryCounter += 1
+		fmt.Printf("%d [FindProvidersSync...] Sending GetProviders to peer: %s for key: %s\n", queryCounter, p.String(), keyMH.B58String())
+		// counterMutex.Unlock()
+		// contactedMutex.Lock()
+		peersContacted = append(peersContacted, p)
+		// contactedMutex.Unlock()
+
+		provs, _, err := dht.protoMessenger.GetProviders(ctx, p, keyMH)
+		if err != nil {
+			fmt.Printf("[FindProvidersSync...] GetProviders to peer %s was unsuccessful\n", p.String())
+			// return
+			continue
+		}
+		fmt.Printf("Got %d providers from peer %s\n", len(provs), p.String())
+		// Add unique providers from request, up to 'count'
+		for _, prov := range provs {
+			dht.maybeAddAddrs(prov.ID, prov.Addrs, peerstore.TempAddrTTL)
+			logger.Debugf("got provider: %s", prov)
+			if psTryAdd(prov.ID) {
+				logger.Debugf("using provider: %s", prov)
+				// peerOutMutex.Lock()
+				peerOut = append(peerOut, *prov)
+				// peerOutMutex.Unlock()
+				if ctx.Err() != nil {
+					logger.Debug("context timed out sending more providers")
+					break
+					// return
+				}
+			}
+			// if !findAll && psSize() >= count {
+			// 	logger.Debugf("got enough providers (%d/%d)", psSize(), count)
+			// 	// return
+			// }
+		}
+		// }(p)
+		if ctx.Err() != nil {
+			logger.Debug("context timed out sending more providers")
+			break
+		}
+	}
+	// wg.Wait()
+
+	fmt.Printf("[FindProvidersSync...] Contacted %d resolvers\n", len(peersContacted))
+	fmt.Printf("[FindProvidersSync...] Found %d providers\n", len(peerOut))
+	return peerOut, peersContacted, nil
+}
+
 // FindProviders searches until the context expires.
 func (dht *IpfsDHT) FindProvidersReturnOnPathNodes(ctx context.Context, c cid.Cid) ([]peer.AddrInfo, []peer.ID, error) {
 	if !dht.enableProviders {
@@ -1230,36 +1368,26 @@ func (dht *IpfsDHT) findProvidersAsyncRoutine(ctx context.Context, key multihash
 			fmt.Println(peers[i])
 		}
 		sybilcidlist := []string{
-			"12D3KooWNFF7dgefegbMFHXEag5WbKQcTcpNPMnxajrbgLcnLrQs",
-			"12D3KooWHXTpLjXiFAN27SPa3fmgqvAgFisZwWRKJrzx3qgUddKQ",
-			"12D3KooWGaC4H4euySceW9ztzdBJvyEwjgz5qmmrJGkBRFXRgoGY",
-			"12D3KooWMka6i5dqgn1erywTs4rUcZB82JiXYVmVgSCcmNw8rgXb",
-			"12D3KooWQ92v3ep6QwzWKzHA2VGD73CypGyCQ1HjLNPAVSFxRER7",
-			"12D3KooWS7jcKHUxmtmBuawuCb9hrmXBy9wmvSsKEj8AVDG4NtWT",
-			"12D3KooWScmiaVCwdqu3WYYdFiZD7sFaNL1YYFQ8yUGpzqn7fwb9",
-			"12D3KooWAMQBrZj5XfT4qUXGAPpS1oBG8kd89qMUvV4ghYcm5B3e",
-			"12D3KooWCcis4uUujSGptfdUcpNKZdC1jNAk3nbKRAYTcbdAMUwo",
-			"12D3KooWD4zDUAH8jmJosLRpmXnpdfL3CuRdLQYzDCohntWvAokZ",
-			"12D3KooWMUa6zjocDX7RqwncxpB7wAW7JTZq6j4i4FJA8TMYymLf",
-			"12D3KooWG6pafkZy2c8C9LRZFupsq3Xhevka1QKXakpW9gVJo3Hv",
-			"12D3KooWK3C9fuKcoHQR7mcH4hyibtBDaMmvhA6NnkVVB8dhSWb9",
-			"12D3KooWDAAFo8fneo3rEPqo5MXSMYbnUGJR3MBe7XDKrjy7YfzH",
-			"12D3KooWHYVVsNiQYNpnXU35QRtiSfRnpMNE8yA7381gt7ioSw4K",
-			"12D3KooWRQy9mzZtCUdGvYhffKubHh6StvAkbhfFc6QdEwFMS3CM",
-			"12D3KooWLaUPBso76akZBeecSE7UTdApAxRVLLcv9gFwfNHapJhA",
-			"12D3KooWG3iQLd5zRzpgu6mjSH8aEp7BLS7hey5DPwZ5VgweU1qF",
-			"12D3KooWKkUoCjN4pKBZJKvWPdBj5CP8eTr9UALVFVrEt5smu8WW",
-			"12D3KooWMrkfnMotLLkFSYVFfomNdFH1Gq9TjzEZTDocco4EBuTS",
-			"12D3KooWRnHv6ArRvS5uvFVjp6NioPZvgVvRRoiVqGmnbeKgBghm",
-			"12D3KooWMUAoE47cEZHeSgnuMF6X6robcECihiCRWps8aF1qJxYy",
-			"12D3KooWFu7Rzgj3H3MMucUHTyiJcoEq73QavL5pafhhvK5gQaXE",
-			"12D3KooWRv7H8pbEqzdFHrPtbvJxoRZfjMHMRoqrBzb4p38nZihZ",
-			"12D3KooWHLzKhYQdTZbJqvSM8cGUPQKtNyBbWPp6NPtyLw6LqqT3",
-			"12D3KooWKV6Gy8A6dnSGCASP3JXBeiZmbs4oTB9R4P2v8Mkatz8F",
-			"12D3KooWMrqg4RKUFc6sovBSRFBF4w2kXHpTG674u6qaNk4GfvZz",
-			"12D3KooWRPoHB671rVCCfzFDnDtfEKGjLgFLnb9RbwWvW7RGvDyd",
-			"12D3KooWLxVu2xriA4BnBprsS4JdMHgdKvghyEWHEYpuDhW2p6yB",
-			"12D3KooWBGHEvNGXpmovRo89n9tEohsaKbvD5MzHBZDiaYZBGWH5",
+			"12D3KooWHBcVvAVpUFPphxdWVs2Tfi1UUuQy3aFq1P8C4wLGfVQp",
+			"12D3KooWAKJiMAzSM3QXuoCndsYjP6kVisMcq8NApG4w4EuCabia",
+			"12D3KooWBqGzZnsMjZxBGsMvaMtWFFdfdb3n2eD8abHsLLd1NiGP",
+			"12D3KooWJrjHd4KJQD4GsKQe6upWJfVv2jhY3oXLKEi5sNkA354d",
+			"12D3KooWLucpHseRWq5tFqm54LR5BjMrn1TJmzAnJwxs4GjWdXX6",
+			"12D3KooWPQF9G4ZfcCXBqUQ1M8dSYwBAgjrTjm269neWgY8YsdWm",
+			"12D3KooWP9YHN8P8WaZBHM4uCVqnuJJzXR6CeTsVtPMJYS1qk9Re",
+			"12D3KooWLSjkhVKgC3b2Tex5hcgoarp6A6rk59jbZKtwDQ3mPe9Q",
+			"12D3KooWKztPnNXSiBuHNhUDuw2SPDZQmRtkptJCsTcqw59HmPZZ",
+			"12D3KooWLD83Cyut9rhU9FG4wSunGoySTCr3V8xC5mHZFD8aY477",
+			"12D3KooWMruZGTp5ESAdtb1Szj2pP83C9RdWu7Yw4BoaswVUaRgA",
+			"12D3KooWQn14xgPeJ6GPY4wsR3UPPw4bGKaVTsvRxszitDdKW4U4",
+			"12D3KooWACi678ygDhS8DVGKEPgEg5NoiSjccsqAee1d71P4zdjC",
+			"12D3KooWMvDDqWH7XEUsZoGY3UJC6EqEkhJvUHDoH9fw2DCxca8Y",
+			"12D3KooWJaWR6wRzm8SaiRB7jRFdjyeRp461VQSUm6E6Dnx4odLh",
+			"12D3KooWEx4FiNjqcPb8z8LFoDGRcU88L5trUKw5LN3JVADy8QjD",
+			"12D3KooWN7TV1w6TTFJ8rLHj5qBkZDqtdHiQ7HiJWrzx6gbWY4CU",
+			"12D3KooWLZV6usdFDVnBR4vZWeD5MQt61QuF1EPjCF8kN5AjqkaT",
+			"12D3KooWLwR28rvdtzHx132P11qY2nE83VuZcZhUxWmtQYcRcmuA",
+			"12D3KooWPnpRa1Vksm4Cs5CPp73GfkJErLgzbQGgnMY1npRTUjBe",
 		}
 
 		numSybilsFound := 0
