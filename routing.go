@@ -994,28 +994,32 @@ func (dht *IpfsDHT) FindProvidersSyncReturnOnPathNodes(ctx context.Context, key 
 }
 
 // FindProviders searches until the context expires.
-func (dht *IpfsDHT) FindProvidersReturnOnPathNodes(ctx context.Context, c cid.Cid) ([]peer.AddrInfo, []peer.ID, error) {
+func (dht *IpfsDHT) FindProvidersReturnOnPathNodes(ctx context.Context, c cid.Cid) ([]peer.AddrInfo, []peer.ID, []peer.ID, error) {
 	if !dht.enableProviders {
-		return nil, nil, routing.ErrNotSupported
+		return nil, nil, nil, routing.ErrNotSupported
 	} else if !c.Defined() {
-		return nil, nil, fmt.Errorf("invalid cid: undefined")
+		return nil, nil, nil, fmt.Errorf("invalid cid: undefined")
 	}
 	fmt.Printf("[FindProvidersReturnOnPathNodes] %s", c.String())
 
 	var providers []peer.AddrInfo
 	var onpathPeers []peer.ID
-	peerOut, peersContacted := dht.FindProvidersAsyncReturnOnPathNodes(ctx, c, dht.bucketSize)
+	var onpathSuccessPeers []peer.ID
+	peerOut, peersContacted, successContacted := dht.FindProvidersAsyncReturnOnPathNodes(ctx, c, dht.bucketSize)
 	for p := range peerOut {
 		providers = append(providers, p)
 	}
 	for p := range peersContacted {
 		onpathPeers = append(onpathPeers, p)
 	}
+	for p := range successContacted {
+		onpathSuccessPeers = append(onpathSuccessPeers, p)
+	}
 
 	fmt.Printf("[FindProviders] Find providers contacted %d providers", len(providers))
 	logger.Debugf("[FindProviders] Find providers contacted %d providers: %d", len(providers))
 
-	return providers, onpathPeers, nil
+	return providers, onpathPeers, onpathSuccessPeers, nil
 }
 
 // FindProvidersAsync is the same thing as FindProviders, but returns a channel.
@@ -1023,13 +1027,15 @@ func (dht *IpfsDHT) FindProvidersReturnOnPathNodes(ctx context.Context, c cid.Ci
 // the search query completes. If count is zero then the query will run until it
 // completes. Note: not reading from the returned channel may block the query
 // from progressing.
-func (dht *IpfsDHT) FindProvidersAsyncReturnOnPathNodes(ctx context.Context, key cid.Cid, count int) (<-chan peer.AddrInfo, <-chan peer.ID) {
+func (dht *IpfsDHT) FindProvidersAsyncReturnOnPathNodes(ctx context.Context, key cid.Cid, count int) (<-chan peer.AddrInfo, <-chan peer.ID, <-chan peer.ID) {
 	if !dht.enableProviders || !key.Defined() {
 		peerOut := make(chan peer.AddrInfo)
 		peersContacted := make(chan peer.ID)
+		successContacted := make(chan peer.ID)
 		close(peerOut)
 		close(peersContacted)
-		return peerOut, peersContacted
+		close(successContacted)
+		return peerOut, peersContacted, successContacted
 	}
 
 	fmt.Printf("[FindProvidersAsyncReturnOnPathNodes] count is %d for Cid: %s \n", count, key.String())
@@ -1040,19 +1046,21 @@ func (dht *IpfsDHT) FindProvidersAsyncReturnOnPathNodes(ctx context.Context, key
 	}
 	peerOut := make(chan peer.AddrInfo, chSize)
 	peersContacted := make(chan peer.ID, 2000) // XXX increase this if necessary
+	successContacted := make(chan peer.ID, 2000)
 
 	keyMH := key.Hash()
 
 	logger.Debugw("finding providers", "cid", key, "mh", internal.LoggableProviderRecordBytes(keyMH))
 	fmt.Printf("[FindProvidersAsyncReturnOnPathNodes] Finding providers for key: %s\n", key.String())
-	go dht.findProvidersAsyncRoutineReturnOnPathNodes(ctx, keyMH, count, peerOut, peersContacted)
+	go dht.findProvidersAsyncRoutineReturnOnPathNodes(ctx, keyMH, count, peerOut, peersContacted, successContacted)
 
-	return peerOut, peersContacted
+	return peerOut, peersContacted, successContacted
 }
 
-func (dht *IpfsDHT) findProvidersAsyncRoutineReturnOnPathNodes(ctx context.Context, key multihash.Multihash, count int, peerOut chan peer.AddrInfo, peersContacted chan peer.ID) {
+func (dht *IpfsDHT) findProvidersAsyncRoutineReturnOnPathNodes(ctx context.Context, key multihash.Multihash, count int, peerOut chan peer.AddrInfo, peersContacted chan peer.ID, successContacted chan peer.ID) {
 	defer close(peerOut)
 	defer close(peersContacted)
+	defer close(successContacted)
 
 	findAll := count == 0
 
@@ -1110,45 +1118,51 @@ func (dht *IpfsDHT) findProvidersAsyncRoutineReturnOnPathNodes(ctx context.Conte
 				fmt.Printf("%d [runLookupWithFollowup] GetProviders sent to peer: %s for key: %s\n", queryCounter, p.String(), key.B58String())
 				fmt.Printf("%d [runLookupWithFollowup] GetClosestPeers sent to peer: %s for key: %s\n", queryCounter, p.String(), keyStr)
 				mutex.Unlock()
-				// select {
-				// case peersContacted <- p:
-				// }
+				select {
+				case peersContacted <- p:
+				}
 
-				closest, err := dht.protoMessenger.GetClosestPeers(ctx, p, peer.ID(key))
+				closest, err1 := dht.protoMessenger.GetClosestPeers(ctx, p, peer.ID(key))
 				if err != nil {
 					logger.Debugf("error getting closer peers: %s", err)
 					return nil, err
 				}
 
-				provs, _, err := dht.protoMessenger.GetProviders(ctx, p, key)
+				provs, _, err2 := dht.protoMessenger.GetProviders(ctx, p, key)
 				if err != nil {
-					return nil, err
-				}
-				select {
-				case peersContacted <- p:
+					return closest, nil
 				}
 
-				logger.Debugf("%d provider entries", len(provs))
+				if err2 == nil {
+					select {
+					case successContacted <- p:
+					}
 
-				// Add unique providers from request, up to 'count'
-				for _, prov := range provs {
-					dht.maybeAddAddrs(prov.ID, prov.Addrs, peerstore.TempAddrTTL)
-					logger.Debugf("got provider: %s", prov)
-					if psTryAdd(prov.ID) {
-						logger.Debugf("using provider: %s", prov)
-						select {
-						case peerOut <- *prov:
-						case <-ctx.Done():
-							logger.Debug("context timed out sending more providers")
-							return nil, ctx.Err()
+					logger.Debugf("%d provider entries", len(provs))
+
+					// Add unique providers from request, up to 'count'
+					for _, prov := range provs {
+						dht.maybeAddAddrs(prov.ID, prov.Addrs, peerstore.TempAddrTTL)
+						logger.Debugf("got provider: %s", prov)
+						if psTryAdd(prov.ID) {
+							logger.Debugf("using provider: %s", prov)
+							select {
+							case peerOut <- *prov:
+							case <-ctx.Done():
+								logger.Debug("context timed out sending more providers")
+								return nil, ctx.Err()
+							}
+						}
+						if !findAll && psSize() >= count {
+							logger.Debugf("got enough providers (%d/%d)", psSize(), count)
+							return nil, nil
 						}
 					}
-					if !findAll && psSize() >= count {
-						logger.Debugf("got enough providers (%d/%d)", psSize(), count)
-						return nil, nil
-					}
 				}
 
+				if err1 != nil {
+					return nil, err1
+				}
 				// Give closer peers back to the query to be queried
 				logger.Debugf("got closer peers: %d %s", len(closest), closest)
 
@@ -1157,8 +1171,8 @@ func (dht *IpfsDHT) findProvidersAsyncRoutineReturnOnPathNodes(ctx context.Conte
 					ID:        p,
 					Responses: closest,
 				})
-
 				return closest, nil
+
 			},
 			func() bool {
 				return !findAll && psSize() >= count
