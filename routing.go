@@ -1098,7 +1098,7 @@ func (dht *IpfsDHT) findProvidersAsyncRoutineReturnOnPathNodes(ctx context.Conte
 	var mutex sync.Mutex
 
 	requestFn := func(ctx context.Context, keyStr string) ([]peer.ID, error) {
-		lookupRes, err := dht.runLookupWithFollowup(ctx, string(key),
+		lookupRes, err := dht.runLookupWithFollowup(ctx, keyStr,
 			func(ctx context.Context, p peer.ID) ([]*peer.AddrInfo, error) {
 				// For DHT query command
 				routing.PublishQueryEvent(ctx, &routing.QueryEvent{
@@ -1107,13 +1107,20 @@ func (dht *IpfsDHT) findProvidersAsyncRoutineReturnOnPathNodes(ctx context.Conte
 				})
 				mutex.Lock()
 				queryCounter += 1
-				fmt.Printf("%d [runLookupWithFollowup] GetProviders sent to peer: %s for key: %s\n", queryCounter, peer.Encode(p), key.B58String())
+				fmt.Printf("%d [runLookupWithFollowup] GetProviders sent to peer: %s for key: %s\n", queryCounter, p.String(), key.B58String())
+				fmt.Printf("%d [runLookupWithFollowup] GetClosestPeers sent to peer: %s for key: %s\n", queryCounter, p.String(), keyStr)
 				mutex.Unlock()
-				//select {
-				//case peersContacted <- p:
-				//}
+				// select {
+				// case peersContacted <- p:
+				// }
 
-				provs, closest, err := dht.protoMessenger.GetProviders(ctx, p, key)
+				closest, err := dht.protoMessenger.GetClosestPeers(ctx, p, peer.ID(key))
+				if err != nil {
+					logger.Debugf("error getting closer peers: %s", err)
+					return nil, err
+				}
+
+				provs, _, err := dht.protoMessenger.GetProviders(ctx, p, key)
 				if err != nil {
 					return nil, err
 				}
