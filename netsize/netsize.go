@@ -139,6 +139,7 @@ func (e *Estimator) Track(key string, peers []peer.ID) error {
 
 // NetworkSize instructs the Estimator to calculate the current network size estimate.
 func (e *Estimator) NetworkSize() (float64, error) {
+	// return 10000, nil // Use this line if you want to bypass network size estimation and use a hard-coded value
 	e.measurementsLk.Lock()
 	defer e.measurementsLk.Unlock()
 
