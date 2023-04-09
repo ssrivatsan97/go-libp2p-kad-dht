@@ -1016,7 +1016,7 @@ func (dht *IpfsDHT) FindProvidersReturnOnPathNodes(ctx context.Context, c cid.Ci
 		onpathSuccessPeers = append(onpathSuccessPeers, p)
 	}
 
-	fmt.Printf("[FindProviders] Find providers contacted %d providers", len(providers))
+	fmt.Printf("[FindProviders] Find providers queried %d nodes, %d responded, and %d providers were found\n", len(onpathPeers), len(onpathSuccessPeers), len(providers))
 	logger.Debugf("[FindProviders] Find providers contacted %d providers: %d", len(providers))
 
 	return providers, onpathPeers, onpathSuccessPeers, nil
@@ -1103,7 +1103,10 @@ func (dht *IpfsDHT) findProvidersAsyncRoutineReturnOnPathNodes(ctx context.Conte
 		}
 	}
 	queryCounter := 0
+	// keep track of peers who we have already asked for providers so that we don't ask them again
+	asked := make(map[peer.ID]struct{})
 	var mutex sync.Mutex
+	var askMutex sync.Mutex
 
 	requestFn := func(ctx context.Context, keyStr string) ([]peer.ID, error) {
 		lookupRes, err := dht.runLookupWithFollowup(ctx, keyStr,
@@ -1115,52 +1118,60 @@ func (dht *IpfsDHT) findProvidersAsyncRoutineReturnOnPathNodes(ctx context.Conte
 				})
 				mutex.Lock()
 				queryCounter += 1
-				fmt.Printf("%d [runLookupWithFollowup] GetProviders sent to peer: %s for key: %s\n", queryCounter, p.String(), key.B58String())
-				fmt.Printf("%d [runLookupWithFollowup] GetClosestPeers sent to peer: %s for key: %s\n", queryCounter, p.String(), keyStr)
+				fmt.Printf("%d [runLookupWithFollowup] GetClosestPeers sent to peer: %s for key: %x\n", queryCounter, p.String(), []byte(kb.ConvertKey(keyStr)))
 				mutex.Unlock()
-				select {
-				case peersContacted <- p:
-				}
+				
+				// send GetClosestPeers message with the new lookup key calculated in the runLookupWithFollowup process
+				// sending GetClosestPeers message even if it has been sent previously to the same peer so that the routing process works correctly, but this may be avoided if done carefully
+				closest, err1 := dht.protoMessenger.GetClosestPeers(ctx, p, peer.ID(keyStr))
 
-				closest, err1 := dht.protoMessenger.GetClosestPeers(ctx, p, peer.ID(key))
-				if err != nil {
-					logger.Debugf("error getting closer peers: %s", err)
-					return nil, err
-				}
-
-				provs, _, err2 := dht.protoMessenger.GetProviders(ctx, p, key)
-				if err != nil {
-					return closest, nil
-				}
-
-				if err2 == nil {
+				// Send GetProviders message if we have not sent to this peer already
+				askMutex.Lock()
+				_, ok := asked[p]
+				askMutex.Unlock()
+				if !ok {
 					select {
-					case successContacted <- p:
+					case peersContacted <- p:
 					}
-
-					logger.Debugf("%d provider entries", len(provs))
-
-					// Add unique providers from request, up to 'count'
-					for _, prov := range provs {
-						dht.maybeAddAddrs(prov.ID, prov.Addrs, peerstore.TempAddrTTL)
-						logger.Debugf("got provider: %s", prov)
-						if psTryAdd(prov.ID) {
-							logger.Debugf("using provider: %s", prov)
-							select {
-							case peerOut <- *prov:
-							case <-ctx.Done():
-								logger.Debug("context timed out sending more providers")
-								return nil, ctx.Err()
-							}
+					askMutex.Lock()
+					asked[p] = struct{}{}
+					askMutex.Unlock()
+					fmt.Printf("[runLookupWithFollowup] GetProviders sent to peer: %s for key: %s\n", p.String(), key.B58String())
+					// the key here is the original cid for which we need providers
+					provs, _, err2 := dht.protoMessenger.GetProviders(ctx, p, key)
+				
+					if err2 != nil {
+						fmt.Printf("[FindProvidersAsync...] GetProviders to peer %s was unsuccessful\n", p.String())
+					} else {
+						select {
+						case successContacted <- p:
 						}
-						if !findAll && psSize() >= count {
-							logger.Debugf("got enough providers (%d/%d)", psSize(), count)
-							return nil, nil
+						fmt.Printf("Got %d providers from peer %s\n", len(provs), p.String())
+						logger.Debugf("%d provider entries", len(provs))
+
+						// Add unique providers from request, up to 'count'
+						for _, prov := range provs {
+							dht.maybeAddAddrs(prov.ID, prov.Addrs, peerstore.TempAddrTTL)
+							logger.Debugf("got provider: %s", prov)
+							if psTryAdd(prov.ID) {
+								logger.Debugf("using provider: %s", prov)
+								select {
+								case peerOut <- *prov:
+								case <-ctx.Done():
+									logger.Debug("context timed out sending more providers")
+									return nil, ctx.Err()
+								}
+							}
+							if !findAll && psSize() >= count {
+								logger.Debugf("got enough providers (%d/%d)", psSize(), count)
+								return nil, nil
+							}
 						}
 					}
 				}
 
 				if err1 != nil {
+					logger.Debugf("error getting closer peers: %s", err1)
 					return nil, err1
 				}
 				// Give closer peers back to the query to be queried
