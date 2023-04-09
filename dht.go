@@ -897,10 +897,10 @@ func (dht *IpfsDHT) GatherNetsizeData() {
 			// fmt.Printf("Error in getting closest peers for random id %s\n", randId)
 			fmt.Println(err)
 		}
-		fmt.Printf("GatherNetsizeData: cpl = %d\n", cpl)
-		fmt.Println("Random id (peer.ID): " + randId.String())
-		fmt.Printf("Multihash: %s\n", multih)
-		fmt.Printf("Found %d closest peers.\n", len(closestPeers))
+		// fmt.Printf("GatherNetsizeData: cpl = %d\n", cpl)
+		// fmt.Println("Random id (peer.ID): " + randId.String())
+		// fmt.Printf("Multihash: %s\n", multih)
+		// fmt.Printf("Found %d closest peers.\n", len(closestPeers))
 		if err = dht.NsEstimator.Track(string(randId), closestPeers); err != nil {
 			logger.Warnf("network size estimator track peers: %s", err)
 		}

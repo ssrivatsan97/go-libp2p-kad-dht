@@ -659,6 +659,7 @@ func (dht *IpfsDHT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (err 
 	if dht.enableSpecialProvide && netsizeErr == nil {
 		// Calculate the expected maximum distance of the `specialProvideNumber` number of closest peers.
 		// Then calculate the minimum common prefix length of all peerids within that distance
+		fmt.Println("Estimated network size as", netsize)
 		minCPL := int(math.Ceil(math.Log2(netsize/float64(dht.specialProvideNumber)))) - 1
 		fmt.Println("Providing cid", key, ", hash:", keyMH, "to all peers with CPL", minCPL)
 		var numLookups int
@@ -775,6 +776,7 @@ func (dht *IpfsDHT) ProvideWithReturn(ctx context.Context, key cid.Cid, brdcst b
 	}
 	var numLookups int
 	if dht.enableSpecialProvide && netsizeErr == nil {
+		fmt.Println("Estimated network size as", netsize)
 		// Calculate the expected maximum distance of the `specialProvideNumber` number of closest peers.
 		// Then calculate the minimum common prefix length of all peerids within that distance
 		minCPL := int(math.Ceil(math.Log2(netsize/float64(dht.specialProvideNumber)))) - 1
@@ -804,11 +806,11 @@ func (dht *IpfsDHT) ProvideWithReturn(ctx context.Context, key cid.Cid, brdcst b
 
 	fmt.Printf("Provide CID hash: %x\n", []byte(kb.ConvertKey(string(keyMH))))
 
-	fmt.Println("Sending provider record to", len(peers), "peers:")
-	for _, pid := range peers {
-		c := []byte(kb.ConvertKey(string(pid)))
-		fmt.Printf("%x\n", c)
-	}
+	// fmt.Println("Sending provider record to", len(peers), "peers:")
+	// for _, pid := range peers {
+	// 	c := []byte(kb.ConvertKey(string(pid)))
+	// 	fmt.Printf("%x\n", c)
+	// }
 
 	wg := sync.WaitGroup{}
 	for _, p := range peers {
@@ -829,10 +831,10 @@ func (dht *IpfsDHT) ProvideWithReturn(ctx context.Context, key cid.Cid, brdcst b
         return context.DeadlineExceeded, make([]peer.ID, 0), make([]peer.ID, 0), 0
 	}
 
-	//_, e := dht.EclipseDetection(ctx, keyMH, peers)
-	//if e != nil {
-    //    return err, make([]peer.ID, 0), make([]peer.ID, 0), 0
-	//}
+	// _, e := dht.EclipseDetection(ctx, keyMH, peers)
+	// if e != nil {
+	// 	return e, make([]peer.ID, 0), 0
+	// }
 
     return ctx.Err(), peers, peersPutProvidersSuccess, numLookups
 }
@@ -1038,8 +1040,6 @@ func (dht *IpfsDHT) FindProvidersAsyncReturnOnPathNodes(ctx context.Context, key
 		return peerOut, peersContacted, successContacted
 	}
 
-	fmt.Printf("[FindProvidersAsyncReturnOnPathNodes] count is %d for Cid: %s \n", count, key.String())
-
 	chSize := count
 	if count == 0 {
 		chSize = 1
@@ -1051,7 +1051,7 @@ func (dht *IpfsDHT) FindProvidersAsyncReturnOnPathNodes(ctx context.Context, key
 	keyMH := key.Hash()
 
 	logger.Debugw("finding providers", "cid", key, "mh", internal.LoggableProviderRecordBytes(keyMH))
-	fmt.Printf("[FindProvidersAsyncReturnOnPathNodes] Finding providers for key: %s\n", key.String())
+	// fmt.Printf("[FindProvidersAsyncReturnOnPathNodes] Finding providers for key: %s\n", key.String())
 	go dht.findProvidersAsyncRoutineReturnOnPathNodes(ctx, keyMH, count, peerOut, peersContacted, successContacted)
 
 	return peerOut, peersContacted, successContacted
@@ -1210,6 +1210,7 @@ func (dht *IpfsDHT) findProvidersAsyncRoutineReturnOnPathNodes(ctx context.Conte
 		}
 	}
 	if dht.enableSpecialProvide && netsizeErr == nil {
+		fmt.Println("Estimated network size as", netsize)
 		minCPL := int(math.Ceil(math.Log2(netsize/float64(dht.specialProvideNumber)))) - 1
 		fmt.Println("Finding providers from all peers with CPL", minCPL)
 		var numLookups int
@@ -1400,6 +1401,7 @@ func (dht *IpfsDHT) findProvidersAsyncRoutine(ctx context.Context, key multihash
 		}
 	}
 	if dht.enableSpecialProvide && netsizeErr == nil {
+		fmt.Println("Estimated network size as", netsize)
 		minCPL := int(math.Ceil(math.Log2(netsize/float64(dht.specialProvideNumber)))) - 1
 		fmt.Println("Finding providers from all peers with CPL", minCPL)
 		var numLookups int
