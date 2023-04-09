@@ -711,10 +711,10 @@ func (dht *IpfsDHT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (err 
 		return context.DeadlineExceeded
 	}
 
-	_, e := dht.EclipseDetection(ctx, keyMH, peers)
-	if e != nil {
-		return e
-	}
+	// _, e := dht.EclipseDetection(ctx, keyMH, peers)
+	// if e != nil {
+	// 	return e
+	// }
 
 	return ctx.Err()
 }
@@ -1235,10 +1235,10 @@ func (dht *IpfsDHT) findProvidersAsyncRoutineReturnOnPathNodes(ctx context.Conte
 		// 	fmt.Println(peers[i])
 		// }
 
-		_, e := dht.EclipseDetection(ctx, key, peers)
-		if e != nil {
-			fmt.Println(e)
-		}
+		// _, e := dht.EclipseDetection(ctx, key, peers)
+		// if e != nil {
+		// 	fmt.Println(e)
+		// }
 	}
 }
 
@@ -1460,10 +1460,10 @@ func (dht *IpfsDHT) findProvidersAsyncRoutine(ctx context.Context, key multihash
 		}
 		fmt.Println("Number of Sybils found:", numSybilsFound)
 
-		_, e := dht.EclipseDetection(ctx, key, peers)
-		if e != nil {
-			fmt.Println(e)
-		}
+		// _, e := dht.EclipseDetection(ctx, key, peers)
+		// if e != nil {
+		// 	fmt.Println(e)
+		// }
 	}
 }
 
