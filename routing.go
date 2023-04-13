@@ -604,8 +604,8 @@ func (dht *IpfsDHT) ProvideWithoutEclipseDetection(ctx context.Context, key cid.
 // TODO later: Do special provide only if eclipse attack is detected.
 
 func (dht *IpfsDHT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (err error) {
-	dht.providerLk.Lock()         // TODO(Srivatsan): This is just to prevent concurrent provides from annoying me for now. Will be removed later
-	defer dht.providerLk.Unlock() // TODO(Srivatsan): This is just to prevent concurrent provides from annoying me for now. Will be removed later
+	// dht.providerLk.Lock()         // TODO(Srivatsan): This is just to prevent concurrent provides from annoying me for now. Will be removed later
+	// defer dht.providerLk.Unlock() // TODO(Srivatsan): This is just to prevent concurrent provides from annoying me for now. Will be removed later
 
 	keyMH := key.Hash()
 	fmt.Println("Provide: cid", key, ", hash:", keyMH)
@@ -686,13 +686,13 @@ func (dht *IpfsDHT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (err 
 		return err
 	}
 
-	fmt.Printf("Provide CID hash: %x\n", []byte(kb.ConvertKey(string(keyMH))))
+	// fmt.Printf("Provide CID hash: %x\n", []byte(kb.ConvertKey(string(keyMH))))
 
-	fmt.Println("Sending provider record to", len(peers), "peers:")
-	for _, pid := range peers {
-		c := []byte(kb.ConvertKey(string(pid)))
-		fmt.Printf("%x\n", c)
-	}
+	// fmt.Println("Sending provider record to", len(peers), "peers:")
+	// for _, pid := range peers {
+	// 	c := []byte(kb.ConvertKey(string(pid)))
+	// 	fmt.Printf("%x\n", c)
+	// }
 
 	wg := sync.WaitGroup{}
 	for _, p := range peers {
@@ -1330,6 +1330,10 @@ func (dht *IpfsDHT) findProvidersAsyncRoutine(ctx context.Context, key multihash
 		}
 	}
 
+	// keep track of peers who we have already asked for providers so that we don't ask them again
+	asked := make(map[peer.ID]struct{})
+	var askMutex sync.Mutex
+
 	requestFn := func(ctx context.Context, keyStr string) ([]peer.ID, error) {
 		lookupRes, err := dht.runLookupWithFollowup(ctx, keyStr,
 			func(ctx context.Context, p peer.ID) ([]*peer.AddrInfo, error) {
@@ -1339,32 +1343,51 @@ func (dht *IpfsDHT) findProvidersAsyncRoutine(ctx context.Context, key multihash
 					ID:   p,
 				})
 
-				provs, closest, err := dht.protoMessenger.GetProviders(ctx, p, key)
-				if err != nil {
-					return nil, err
-				}
+				// send GetClosestPeers message with the new lookup key calculated in the runLookupWithFollowup process
+				// sending GetClosestPeers message even if it has been sent previously to the same peer so that the routing process works correctly, but this may be avoided if done carefully
+				closest, err1 := dht.protoMessenger.GetClosestPeers(ctx, p, peer.ID(keyStr))
 
-				logger.Debugf("%d provider entries", len(provs))
+				// Send GetProviders message if we have not sent to this peer already
+				askMutex.Lock()
+				_, ok := asked[p]
+				askMutex.Unlock()
+				if !ok {
+					askMutex.Lock()
+					asked[p] = struct{}{}
+					askMutex.Unlock()
 
-				// Add unique providers from request, up to 'count'
-				for _, prov := range provs {
-					dht.maybeAddAddrs(prov.ID, prov.Addrs, peerstore.TempAddrTTL)
-					logger.Debugf("got provider: %s", prov)
-					if psTryAdd(prov.ID) {
-						logger.Debugf("using provider: %s", prov)
-						select {
-						case peerOut <- *prov:
-						case <-ctx.Done():
-							logger.Debug("context timed out sending more providers")
-							return nil, ctx.Err()
+					provs, _, err2 := dht.protoMessenger.GetProviders(ctx, p, key)
+					
+					if err2 != nil {
+						logger.Debugf("error getting providers from %s: %s", p, err2)
+					} else {
+						logger.Debugf("%d provider entries", len(provs))
+
+						// Add unique providers from request, up to 'count'
+						for _, prov := range provs {
+							dht.maybeAddAddrs(prov.ID, prov.Addrs, peerstore.TempAddrTTL)
+							logger.Debugf("got provider: %s", prov)
+							if psTryAdd(prov.ID) {
+								logger.Debugf("using provider: %s", prov)
+								select {
+								case peerOut <- *prov:
+								case <-ctx.Done():
+									logger.Debug("context timed out sending more providers")
+									return nil, ctx.Err()
+								}
+							}
+							if !findAll && psSize() >= count {
+								logger.Debugf("got enough providers (%d/%d)", psSize(), count)
+								return nil, nil
+							}
 						}
 					}
-					if !findAll && psSize() >= count {
-						logger.Debugf("got enough providers (%d/%d)", psSize(), count)
-						return nil, nil
-					}
 				}
 
+				if err1 != nil {
+					logger.Debugf("error getting closer peers: %s", err1)
+					return nil, err1
+				}
 				// Give closer peers back to the query to be queried
 				logger.Debugf("got closer peers: %d %s", len(closest), closest)
 
@@ -1373,7 +1396,6 @@ func (dht *IpfsDHT) findProvidersAsyncRoutine(ctx context.Context, key multihash
 					ID:        p,
 					Responses: closest,
 				})
-
 				return closest, nil
 			},
 			func() bool {
@@ -1421,44 +1443,10 @@ func (dht *IpfsDHT) findProvidersAsyncRoutine(ctx context.Context, key multihash
 
 	// // Check here also for eclipse attacks.
 	if peers != nil {
-		fmt.Println("Found closest peers: ")
-		for i := range peers {
-			fmt.Println(peers[i])
-		}
-		sybilcidlist := []string{
-			"12D3KooWHBcVvAVpUFPphxdWVs2Tfi1UUuQy3aFq1P8C4wLGfVQp",
-			"12D3KooWAKJiMAzSM3QXuoCndsYjP6kVisMcq8NApG4w4EuCabia",
-			"12D3KooWBqGzZnsMjZxBGsMvaMtWFFdfdb3n2eD8abHsLLd1NiGP",
-			"12D3KooWJrjHd4KJQD4GsKQe6upWJfVv2jhY3oXLKEi5sNkA354d",
-			"12D3KooWLucpHseRWq5tFqm54LR5BjMrn1TJmzAnJwxs4GjWdXX6",
-			"12D3KooWPQF9G4ZfcCXBqUQ1M8dSYwBAgjrTjm269neWgY8YsdWm",
-			"12D3KooWP9YHN8P8WaZBHM4uCVqnuJJzXR6CeTsVtPMJYS1qk9Re",
-			"12D3KooWLSjkhVKgC3b2Tex5hcgoarp6A6rk59jbZKtwDQ3mPe9Q",
-			"12D3KooWKztPnNXSiBuHNhUDuw2SPDZQmRtkptJCsTcqw59HmPZZ",
-			"12D3KooWLD83Cyut9rhU9FG4wSunGoySTCr3V8xC5mHZFD8aY477",
-			"12D3KooWMruZGTp5ESAdtb1Szj2pP83C9RdWu7Yw4BoaswVUaRgA",
-			"12D3KooWQn14xgPeJ6GPY4wsR3UPPw4bGKaVTsvRxszitDdKW4U4",
-			"12D3KooWACi678ygDhS8DVGKEPgEg5NoiSjccsqAee1d71P4zdjC",
-			"12D3KooWMvDDqWH7XEUsZoGY3UJC6EqEkhJvUHDoH9fw2DCxca8Y",
-			"12D3KooWJaWR6wRzm8SaiRB7jRFdjyeRp461VQSUm6E6Dnx4odLh",
-			"12D3KooWEx4FiNjqcPb8z8LFoDGRcU88L5trUKw5LN3JVADy8QjD",
-			"12D3KooWN7TV1w6TTFJ8rLHj5qBkZDqtdHiQ7HiJWrzx6gbWY4CU",
-			"12D3KooWLZV6usdFDVnBR4vZWeD5MQt61QuF1EPjCF8kN5AjqkaT",
-			"12D3KooWLwR28rvdtzHx132P11qY2nE83VuZcZhUxWmtQYcRcmuA",
-			"12D3KooWPnpRa1Vksm4Cs5CPp73GfkJErLgzbQGgnMY1npRTUjBe",
-		}
-
-		numSybilsFound := 0
-		for _, pid := range peers {
-			pidString := fmt.Sprintf("%s", pid)
-			for _, spid := range sybilcidlist {
-				if pidString == spid {
-					numSybilsFound += 1
-					break
-				}
-			}
-		}
-		fmt.Println("Number of Sybils found:", numSybilsFound)
+		// fmt.Println("Found closest peers: ")
+		// for i := range peers {
+		// 	fmt.Println(peers[i])
+		// }
 
 		// _, e := dht.EclipseDetection(ctx, key, peers)
 		// if e != nil {
