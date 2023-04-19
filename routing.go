@@ -408,11 +408,13 @@ func (dht *IpfsDHT) EclipseDetection(ctx context.Context, keyMH multihash.Multih
 	}
 	fmt.Println("Estimated network size as", netsize)
 
-	l_est := dht.Detector.UpdateLFromNetsize(int(netsize))
-	fmt.Println("Estimated parameter l as", l_est)
+	// l_est := dht.Detector.UpdateLFromNetsize(int(netsize))
+	// fmt.Println("Estimated parameter l as", l_est)
 	// dht.Detector.UpdateThreshold(1.0)
-	threshold := dht.Detector.UpdateThresholdFromNetsize(int(netsize))
-	fmt.Println("Estimated threshold as", threshold)
+	// threshold := dht.Detector.UpdateThresholdFromNetsize(int(netsize))
+	// fmt.Println("Estimated threshold as", threshold)
+	dht.Detector.UpdateIdealDistFromNetsize(int(netsize))
+	// fmt.Println("Estimated ideal distribution: ", idealDist)
 
 	targetBytes := []byte(kb.ConvertKey(string(keyMH)))
 	// fmt.Println("Eclipse attack detection for id hash:", keyMH)
@@ -437,15 +439,15 @@ func (dht *IpfsDHT) EclipseDetection(ctx context.Context, keyMH multihash.Multih
 	} else {
 		resultStr = "no attack"
 	}
-	fmt.Println("Eclipse attack detector says: ", resultStr, ", threshold =", threshold)
+	fmt.Println("Eclipse attack detector says: ", resultStr, ", threshold =", dht.Detector.GetThreshold())
 	// Eclipse attack detection code ends here
 	return result, nil
 }
 
 type EclipseDetectionResult = struct {
-	Counts    []int
-	Netsize   float64
-	L         int
+	Counts  []int
+	Netsize float64
+	// L         int
 	Threshold float64
 	KL        float64
 	Detection bool
@@ -475,11 +477,12 @@ func (dht *IpfsDHT) EclipseDetectionVerbose(ctx context.Context, keyMH multihash
 	}
 	fmt.Println("Estimated network size as", netsize)
 
-	l_est := dht.Detector.UpdateLFromNetsize(int(netsize))
-	fmt.Println("Estimated parameter l as", l_est)
+	// l_est := dht.Detector.UpdateLFromNetsize(int(netsize))
+	// fmt.Println("Estimated parameter l as", l_est)
 	// dht.Detector.UpdateThreshold(1.0)
-	threshold := dht.Detector.UpdateThresholdFromNetsize(int(netsize))
-	fmt.Println("Estimated threshold as", threshold)
+	// threshold := dht.Detector.UpdateThresholdFromNetsize(int(netsize))
+	// fmt.Println("Estimated threshold as", threshold)
+	dht.Detector.UpdateIdealDistFromNetsize(int(netsize))
 
 	targetBytes := []byte(kb.ConvertKey(string(keyMH)))
 	// fmt.Println("Eclipse attack detection for id hash:", keyMH)
@@ -504,12 +507,13 @@ func (dht *IpfsDHT) EclipseDetectionVerbose(ctx context.Context, keyMH multihash
 	} else {
 		resultStr = "no attack"
 	}
+	threshold := dht.Detector.GetThreshold()
 	fmt.Println("Eclipse attack detector says: ", resultStr, ", threshold =", threshold)
 	// Eclipse attack detection code ends here
 	return EclipseDetectionResult{
-		Counts:    counts,
-		Netsize:   netsize,
-		L:         l_est,
+		Counts:  counts,
+		Netsize: netsize,
+		// L:         l_est,
 		Threshold: threshold,
 		KL:        kl,
 		Detection: result,
