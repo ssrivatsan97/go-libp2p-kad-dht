@@ -66,18 +66,18 @@ func (dht *IpfsDHT) GetClosestPeers(ctx context.Context, key string) ([]peer.ID,
 	return lookupRes.peers, ctx.Err()
 }
 
+// Function to find all peers with common prefix length >= minCPL with key
 func (dht *IpfsDHT) GetPeersWithCPLGet(ctx context.Context, key string, minCPL int) ([]peer.ID, int, error) {
 	return dht.GetPeersWithCPL(ctx, key, minCPL, dht.GetClosestPeers)
 }
 
-// Function to find all peers with common prefix length >= minCPL with key
+// Function to find all peers with common prefix length >= minCPL with key, and send a request to each found peer based on requestFn
 func (dht *IpfsDHT) GetPeersWithCPL(ctx context.Context, key string, minCPL int, requestFn requestFn) ([]peer.ID, int, error) {
 	// Input validation
 	if minCPL < 0 {
 		minCPL = 0
 	}
 	numLookups := 0
-	// set, err := dht.GetClosestPeers(ctx, key)
 	set, err := requestFn(ctx, key)
 	if err != nil {
 		return nil, numLookups, err
@@ -116,14 +116,12 @@ func (dht *IpfsDHT) GetPeersWithCPL(ctx context.Context, key string, minCPL int,
 			// At least, the function won't go into an infinite loop!
 			queryPeerID = set[len(set)-1]
 			// fmt.Printf("CPL: %d, Chosen peerid: %x\n", cpl, kb.ConvertPeerID(queryPeerID))
-			// newSet, err := dht.GetClosestPeers(ctx, string(queryPeerID))
 			newSet, err := requestFn(ctx, string(queryPeerID))
 			if err != nil {
 				return nil, numLookups, err
 			}
 			numLookups += 1
 			set = append(set, newSet...)
-			// cpl = minCommonPrefixLength(set, key)
 			cpl -= 1 // This does not guarantee correctness, but prevents an infinite loop!
 		}
 
@@ -161,6 +159,7 @@ func (dht *IpfsDHT) GetPeersWithDistance(ctx context.Context, key string, maxDis
 		return nil, numLookups, err
 	}
 	// Keep only those with required distance
+	// Dedeuplication is not necessary because GetPeersWithCPL() already does it
 	truncSet := make([]peer.ID, 0, len(set))
 	keyHash := kb.ConvertKey(key)
 	maxDistHex := fmt.Sprintf("%x", maxDist)

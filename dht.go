@@ -161,9 +161,9 @@ type IpfsDHT struct {
 
 	// Used for eclipse attack detection
 	Detector             *detection.EclipseDetector
-	providerLk           sync.Mutex // TODO(Srivatsan): This is just to prevent concurrent provides from annoying me for now. Will be removed later
-	enableSpecialProvide bool       // This flag controls whether the special provide option is invoked.
-	specialProvideNumber int
+	providerLk           sync.Mutex // TODO: This is just to prevent concurrent provides from annoying me for now. Will be removed later
+	enableRegionProvide bool       // This flag controls whether the special provide option is invoked.
+	provideRegionSize int
 }
 
 // Assert that IPFS assumptions about interfaces aren't broken. These aren't a
@@ -372,7 +372,7 @@ func makeDHT(ctx context.Context, h host.Host, cfg dhtcfg.Config) (*IpfsDHT, err
 
 	dht.addDetector() // TODO: Later, this may be made optional
 
-	dht.specialProvideNumber = 20
+	dht.provideRegionSize = 20
 
 	return dht, nil
 }
