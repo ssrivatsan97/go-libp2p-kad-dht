@@ -408,11 +408,6 @@ func (dht *IpfsDHT) EclipseDetection(ctx context.Context, keyMH multihash.Multih
 	}
 	fmt.Println("Estimated network size as", netsize)
 
-	// l_est := dht.Detector.UpdateLFromNetsize(int(netsize))
-	// fmt.Println("Estimated parameter l as", l_est)
-	// dht.Detector.UpdateThreshold(1.0)
-	// threshold := dht.Detector.UpdateThresholdFromNetsize(int(netsize))
-	// fmt.Println("Estimated threshold as", threshold)
 	dht.Detector.UpdateIdealDistFromNetsize(int(netsize))
 	// fmt.Println("Estimated ideal distribution: ", idealDist)
 
@@ -447,7 +442,6 @@ func (dht *IpfsDHT) EclipseDetection(ctx context.Context, keyMH multihash.Multih
 type EclipseDetectionResult = struct {
 	Counts  []int
 	Netsize float64
-	// L         int
 	Threshold float64
 	KL        float64
 	Detection bool
@@ -477,11 +471,6 @@ func (dht *IpfsDHT) EclipseDetectionVerbose(ctx context.Context, keyMH multihash
 	}
 	fmt.Println("Estimated network size as", netsize)
 
-	// l_est := dht.Detector.UpdateLFromNetsize(int(netsize))
-	// fmt.Println("Estimated parameter l as", l_est)
-	// dht.Detector.UpdateThreshold(1.0)
-	// threshold := dht.Detector.UpdateThresholdFromNetsize(int(netsize))
-	// fmt.Println("Estimated threshold as", threshold)
 	dht.Detector.UpdateIdealDistFromNetsize(int(netsize))
 
 	targetBytes := []byte(kb.ConvertKey(string(keyMH)))
@@ -513,7 +502,6 @@ func (dht *IpfsDHT) EclipseDetectionVerbose(ctx context.Context, keyMH multihash
 	return EclipseDetectionResult{
 		Counts:  counts,
 		Netsize: netsize,
-		// L:         l_est,
 		Threshold: threshold,
 		KL:        kl,
 		Detection: result,
