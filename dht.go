@@ -78,7 +78,7 @@ type addPeerRTReq struct {
 	queryPeer bool
 }
 
-const defaultEclipseDetectionK = 20
+const defaultEclipseDetectionK = 20 // number of peers to sample for eclipse detection. Although it's possible to use a different value, attack detection is best when k = 20 (same as the k in kademlia)
 
 // IpfsDHT is an implementation of Kademlia with S/Kademlia modifications.
 // It is used to implement the base Routing module.
@@ -160,10 +160,10 @@ type IpfsDHT struct {
 	testAddressUpdateProcessing bool
 
 	// Used for eclipse attack detection
-	Detector             *detection.EclipseDetector
-	providerLk           sync.Mutex // TODO: This is just to prevent concurrent provides from annoying me for now. Will be removed later
-	enableRegionProvide bool       // This flag controls whether the special provide option is invoked.
-	provideRegionSize int
+	Detector *detection.EclipseDetector
+	// providerLk          sync.Mutex // Use this to prevent concurrent provides from logging too much information
+	enableRegionProvide bool // This flag controls whether the special provide option is invoked.
+	provideRegionSize   int
 }
 
 // Assert that IPFS assumptions about interfaces aren't broken. These aren't a

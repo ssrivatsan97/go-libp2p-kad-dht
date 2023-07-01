@@ -423,10 +423,10 @@ func (dht *IpfsDHT) EclipseDetection(ctx context.Context, keyMH multihash.Multih
 
 	counts := dht.Detector.ComputePrefixLenCounts(targetBytes, peeridsBytes)
 	kl := dht.Detector.ComputeKLFromCounts(counts)
-	fmt.Println("Counts:", counts)
+	// fmt.Println("Counts:", counts)
 	fmt.Println("KL divergence:", kl)
 	result := dht.Detector.DetectFromKL(kl)
-	fmt.Println("Eclipse detection result:", result)
+	// fmt.Println("Eclipse detection result:", result)
 	var resultStr string
 	if result {
 		resultStr = "possible attack"
@@ -439,8 +439,8 @@ func (dht *IpfsDHT) EclipseDetection(ctx context.Context, keyMH multihash.Multih
 }
 
 type EclipseDetectionResult = struct {
-	Counts  []int
-	Netsize float64
+	Counts    []int
+	Netsize   float64
 	Threshold float64
 	KL        float64
 	Detection bool
@@ -485,10 +485,10 @@ func (dht *IpfsDHT) EclipseDetectionVerbose(ctx context.Context, keyMH multihash
 
 	counts := dht.Detector.ComputePrefixLenCounts(targetBytes, peeridsBytes)
 	kl := dht.Detector.ComputeKLFromCounts(counts)
-	fmt.Println("Counts:", counts)
+	// fmt.Println("Counts:", counts)
 	fmt.Println("KL divergence:", kl)
 	result := dht.Detector.DetectFromKL(kl)
-	fmt.Println("Eclipse detection result:", result)
+	// fmt.Println("Eclipse detection result:", result)
 	var resultStr string
 	if result {
 		resultStr = "possible attack"
@@ -499,8 +499,8 @@ func (dht *IpfsDHT) EclipseDetectionVerbose(ctx context.Context, keyMH multihash
 	fmt.Println("Eclipse attack detector says: ", resultStr, ", threshold =", threshold)
 	// Eclipse attack detection code ends here
 	return EclipseDetectionResult{
-		Counts:  counts,
-		Netsize: netsize,
+		Counts:    counts,
+		Netsize:   netsize,
 		Threshold: threshold,
 		KL:        kl,
 		Detection: result,
@@ -523,7 +523,7 @@ func (dht *IpfsDHT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (err 
 	// defer dht.providerLk.Unlock() // This is just to prevent concurrent provides from annoying me for now. Will be removed later
 
 	keyMH := key.Hash()
-	fmt.Println("Provide: cid", key, ", hash:", keyMH)
+	// fmt.Println("Provide: cid", key, ", hash:", keyMH)
 
 	if !dht.enableProviders {
 		return routing.ErrNotSupported
@@ -626,6 +626,7 @@ func (dht *IpfsDHT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (err 
 		return context.DeadlineExceeded
 	}
 
+	// TODO: Run region-based provide only if eclipse attack is detected
 	// _, e := dht.EclipseDetection(ctx, keyMH, peers)
 	// if e != nil {
 	// 	return e
@@ -637,11 +638,11 @@ func (dht *IpfsDHT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (err 
 // Used for experiments where we want to log data from the provide operation
 func (dht *IpfsDHT) ProvideWithReturn(ctx context.Context, key cid.Cid, brdcst bool) (error, []peer.ID, []peer.ID, int) {
 	var err error
-	dht.providerLk.Lock()         // This is just to prevent concurrent provides from annoying me for now. Will be removed later
-	defer dht.providerLk.Unlock() // This is just to prevent concurrent provides from annoying me for now. Will be removed later
+	// dht.providerLk.Lock()         // This is just to prevent concurrent provides from annoying me for now. Will be removed later
+	// defer dht.providerLk.Unlock() // This is just to prevent concurrent provides from annoying me for now. Will be removed later
 
 	keyMH := key.Hash()
-	fmt.Println("Provide: cid", key, ", hash:", keyMH)
+	// fmt.Println("Provide: cid", key, ", hash:", keyMH)
 
 	if !dht.enableProviders {
 		return routing.ErrNotSupported, make([]peer.ID, 0), make([]peer.ID, 0), 0
@@ -720,7 +721,7 @@ func (dht *IpfsDHT) ProvideWithReturn(ctx context.Context, key cid.Cid, brdcst b
 		return err, make([]peer.ID, 0), make([]peer.ID, 0), 0
 	}
 
-	fmt.Printf("Provide CID hash: %x\n", []byte(kb.ConvertKey(string(keyMH))))
+	// fmt.Printf("Provide CID hash: %x\n", []byte(kb.ConvertKey(string(keyMH))))
 
 	// fmt.Println("Sending provider record to", len(peers), "peers:")
 	// for _, pid := range peers {
@@ -747,6 +748,7 @@ func (dht *IpfsDHT) ProvideWithReturn(ctx context.Context, key cid.Cid, brdcst b
 		return context.DeadlineExceeded, make([]peer.ID, 0), make([]peer.ID, 0), 0
 	}
 
+	// TODO: Run region-based provide only if eclipse attack is detected
 	//_, e := dht.EclipseDetection(ctx, keyMH, peers)
 	//if e != nil {
 	//    return err, make([]peer.ID, 0), make([]peer.ID, 0), 0
@@ -762,7 +764,7 @@ func (dht *IpfsDHT) FindProvidersReturnOnPathNodes(ctx context.Context, c cid.Ci
 	} else if !c.Defined() {
 		return nil, nil, nil, fmt.Errorf("invalid cid: undefined")
 	}
-	fmt.Printf("[FindProvidersReturnOnPathNodes] %s", c.String())
+	// fmt.Printf("[FindProvidersReturnOnPathNodes] %s", c.String())
 
 	var providers []peer.AddrInfo
 	var onpathPeers []peer.ID
@@ -778,7 +780,7 @@ func (dht *IpfsDHT) FindProvidersReturnOnPathNodes(ctx context.Context, c cid.Ci
 		onpathSuccessPeers = append(onpathSuccessPeers, p)
 	}
 
-	fmt.Printf("[FindProviders] Find providers queried %d nodes, %d responded, and %d providers were found\n", len(onpathPeers), len(onpathSuccessPeers), len(providers))
+	// fmt.Printf("[FindProviders] Find providers queried %d nodes, %d responded, and %d providers were found\n", len(onpathPeers), len(onpathSuccessPeers), len(providers))
 	logger.Debugf("[FindProviders] Find providers contacted %d providers: %d", len(providers))
 
 	return providers, onpathPeers, onpathSuccessPeers, nil
@@ -878,7 +880,7 @@ func (dht *IpfsDHT) findProvidersAsyncRoutineReturnOnPathNodes(ctx context.Conte
 				})
 				mutex.Lock()
 				queryCounter += 1
-				fmt.Printf("%d [runLookupWithFollowup] GetClosestPeers sent to peer: %s for key: %x\n", queryCounter, p.String(), []byte(kb.ConvertKey(keyStr)))
+				// fmt.Printf("%d [runLookupWithFollowup] GetClosestPeers sent to peer: %s for key: %x\n", queryCounter, p.String(), []byte(kb.ConvertKey(keyStr)))
 				mutex.Unlock()
 
 				// send GetClosestPeers message with the new lookup key calculated in the runLookupWithFollowup process
@@ -896,7 +898,7 @@ func (dht *IpfsDHT) findProvidersAsyncRoutineReturnOnPathNodes(ctx context.Conte
 					askMutex.Lock()
 					asked[p] = struct{}{}
 					askMutex.Unlock()
-					fmt.Printf("[runLookupWithFollowup] GetProviders sent to peer: %s for key: %s\n", p.String(), key.B58String())
+					// fmt.Printf("[runLookupWithFollowup] GetProviders sent to peer: %s for key: %s\n", p.String(), key.B58String())
 					// the key here is the original cid for which we need providers
 					provs, _, err2 := dht.protoMessenger.GetProviders(ctx, p, key)
 
@@ -906,7 +908,7 @@ func (dht *IpfsDHT) findProvidersAsyncRoutineReturnOnPathNodes(ctx context.Conte
 						select {
 						case successContacted <- p:
 						}
-						fmt.Printf("Got %d providers from peer %s\n", len(provs), p.String())
+						// fmt.Printf("Got %d providers from peer %s\n", len(provs), p.String())
 						logger.Debugf("%d provider entries", len(provs))
 
 						// Add unique providers from request, up to 'count'
@@ -988,7 +990,8 @@ func (dht *IpfsDHT) findProvidersAsyncRoutineReturnOnPathNodes(ctx context.Conte
 		peers, err = requestFn(ctx, string(key))
 	}
 
-	// // Check here also for eclipse attacks.
+	// TODO: Run region-based provide only if eclipse attack is detected
+	// Check here also for eclipse attacks.
 	if peers != nil {
 		// fmt.Println("Found closest peers: ")
 		// for i := range peers {
@@ -1004,7 +1007,7 @@ func (dht *IpfsDHT) findProvidersAsyncRoutineReturnOnPathNodes(ctx context.Conte
 
 // FindProviders searches until the context expires.
 func (dht *IpfsDHT) FindProviders(ctx context.Context, c cid.Cid) ([]peer.AddrInfo, error) {
-	fmt.Println("FindProviders: cid ", c, "hash:", c.Hash())
+	// fmt.Println("FindProviders: cid ", c, "hash:", c.Hash())
 
 	if !dht.enableProviders {
 		return nil, routing.ErrNotSupported
@@ -1025,7 +1028,7 @@ func (dht *IpfsDHT) FindProviders(ctx context.Context, c cid.Cid) ([]peer.AddrIn
 // completes. Note: not reading from the returned channel may block the query
 // from progressing.
 func (dht *IpfsDHT) FindProvidersAsync(ctx context.Context, key cid.Cid, count int) <-chan peer.AddrInfo {
-	fmt.Println("FindProvidersAsync: cid ", key, ", hash:", key.Hash())
+	// fmt.Println("FindProvidersAsync: cid ", key, ", hash:", key.Hash())
 
 	if !dht.enableProviders || !key.Defined() {
 		peerOut := make(chan peer.AddrInfo)
@@ -1201,6 +1204,7 @@ func (dht *IpfsDHT) findProvidersAsyncRoutine(ctx context.Context, key multihash
 		peers, err = requestFn(ctx, string(key))
 	}
 
+	// TODO: Run region-based provide only if eclipse attack is detected
 	// // Check here also for eclipse attacks.
 	if peers != nil {
 		// fmt.Println("Found closest peers: ")

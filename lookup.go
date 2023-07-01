@@ -56,6 +56,7 @@ func (dht *IpfsDHT) GetClosestPeers(ctx context.Context, key string) ([]peer.ID,
 
 	if ctx.Err() == nil && lookupRes.completed {
 		// tracking lookup results for network size estimator
+		// currently disabled because we should not track peers from queries for only attacked CIDs. Instead use GatherNetsizeData() periodically to query random keys and update the netsize estimate
 		// if err = dht.nsEstimator.Track(key, lookupRes.peers); err != nil {
 		// 	logger.Warnf("network size estimator track peers: %s", err)
 		// }
