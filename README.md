@@ -2,6 +2,10 @@
 
 This fork adds censorship attack detection and mitigation to `go-libp2p-kad-dht`. This fork diverges from github.com/libp2p/go-libp2p-kad-dht after v0.20.0. 
 
+## Outline
+Detection is mainly implemented in **eclipse-detection/detection.go** and is invoked from `EclipseDetection()` in **routing.go**. Region-based queries for mitigation are implemented in **lookup.go**. We modify `Provide()` and `FindProviders()` in **routing.go** to use region-based queries if mitigation is enabled.
+## How to Use?
+
 Clone this repository. Also clone github.com/ipfs/kubo.
 
 Launch the ipfs daemon.
