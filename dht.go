@@ -876,10 +876,9 @@ func (dht *IpfsDHT) addDetector() {
 	dht.Detector = detection.New(defaultEclipseDetectionK)
 }
 
-func (dht *IpfsDHT) GatherNetsizeData() {
+func (dht *IpfsDHT) GatherNetsizeData(ctx context.Context) {
 	fmt.Println("Doing a few queries to initialize the netsize estimator. This may take some time...")
 	const numSamples = 10
-	ctx := dht.Context()
 	for cpl := 0; cpl < numSamples; cpl++ {
 		randId, err := dht.routingTable.GenRandPeerID(uint(cpl))
 		if err != nil {

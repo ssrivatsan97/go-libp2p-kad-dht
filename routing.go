@@ -399,7 +399,7 @@ func (dht *IpfsDHT) EclipseDetection(ctx context.Context, keyMH multihash.Multih
 
 	netsize, netsizeErr := dht.NsEstimator.NetworkSize()
 	if netsizeErr != nil {
-		dht.GatherNetsizeData()
+		dht.GatherNetsizeData(ctx)
 		netsize, netsizeErr = dht.NsEstimator.NetworkSize()
 		if netsizeErr != nil {
 			return false, netsizeErr
@@ -462,7 +462,7 @@ func (dht *IpfsDHT) EclipseDetectionVerbose(ctx context.Context, keyMH multihash
 
 	netsize, netsizeErr := dht.NsEstimator.NetworkSize()
 	if netsizeErr != nil {
-		dht.GatherNetsizeData()
+		dht.GatherNetsizeData(ctx)
 		netsize, netsizeErr = dht.NsEstimator.NetworkSize()
 		if netsizeErr != nil {
 			return EclipseDetectionResult{}, netsizeErr
@@ -567,7 +567,7 @@ func (dht *IpfsDHT) Provide(ctx context.Context, key cid.Cid, brdcst bool) (err 
 	if dht.enableRegionProvide {
 		netsize, netsizeErr = dht.NsEstimator.NetworkSize()
 		if netsizeErr != nil {
-			dht.GatherNetsizeData()
+			dht.GatherNetsizeData(ctx)
 			netsize, netsizeErr = dht.NsEstimator.NetworkSize()
 		}
 	}
@@ -687,7 +687,7 @@ func (dht *IpfsDHT) ProvideWithReturn(ctx context.Context, key cid.Cid, brdcst b
 	if dht.enableRegionProvide {
 		netsize, netsizeErr = dht.NsEstimator.NetworkSize()
 		if netsizeErr != nil {
-			dht.GatherNetsizeData()
+			dht.GatherNetsizeData(ctx)
 			netsize, netsizeErr = dht.NsEstimator.NetworkSize()
 		}
 	}
@@ -903,7 +903,7 @@ func (dht *IpfsDHT) findProvidersAsyncRoutineReturnOnPathNodes(ctx context.Conte
 					provs, _, err2 := dht.protoMessenger.GetProviders(ctx, p, key)
 
 					if err2 != nil {
-						fmt.Printf("[FindProvidersAsync...] GetProviders to peer %s was unsuccessful\n", p.String())
+						// fmt.Printf("[FindProvidersAsync...] GetProviders to peer %s was unsuccessful\n", p.String())
 					} else {
 						select {
 						case successContacted <- p:
@@ -967,7 +967,7 @@ func (dht *IpfsDHT) findProvidersAsyncRoutineReturnOnPathNodes(ctx context.Conte
 	if dht.enableRegionProvide {
 		netsize, netsizeErr = dht.NsEstimator.NetworkSize()
 		if netsizeErr != nil {
-			dht.GatherNetsizeData()
+			dht.GatherNetsizeData(ctx)
 			netsize, netsizeErr = dht.NsEstimator.NetworkSize()
 		}
 	}
@@ -1181,7 +1181,7 @@ func (dht *IpfsDHT) findProvidersAsyncRoutine(ctx context.Context, key multihash
 	if dht.enableRegionProvide {
 		netsize, netsizeErr = dht.NsEstimator.NetworkSize()
 		if netsizeErr != nil {
-			dht.GatherNetsizeData()
+			dht.GatherNetsizeData(ctx)
 			netsize, netsizeErr = dht.NsEstimator.NetworkSize()
 		}
 	}
